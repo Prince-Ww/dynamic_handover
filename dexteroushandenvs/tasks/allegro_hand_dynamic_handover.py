@@ -811,10 +811,10 @@ class AllegroHandDynamicHandover(BaseTask):
 
         with TemporaryGrad():
             self.predict_pose, self.pose_latent_vector = self.predict_contact_pose(self.traj_estimator, self.object_state_stack_frames)
-            self.update_contact_slamer(self.predict_pose)
+            # self.update_contact_slamer(self.predict_pose)
 
-        self.obs_buf[:, 260:263] = self.predict_pose[:, 0:3].detach()
-        # self.obs_buf[:, 260:263] = (self.goal_pos - self.allegro_right_hand_base_pos).clone()
+        # self.obs_buf[:, 260:263] = self.predict_pose[:, 0:3].detach()
+        self.obs_buf[:, 260:263] = (self.goal_pos - self.allegro_right_hand_base_pos).clone()
         self.obs_buf[:, 248:260] = self.object_state_stack_frames[:, 36:48].clone() + rand_floats[:, 0:12] * 0.05
 
         for i in range(len(self.obs_buf_stack_frames) - 1):
@@ -1044,7 +1044,9 @@ class AllegroHandDynamicHandover(BaseTask):
         if self.total_steps % (200 * (self.max_episode_length - 1)) == 0:
             iter = int(self.total_steps / (200 * (self.max_episode_length - 1)))
             if not self.is_test:
-                torch.save(self.traj_estimator.state_dict(), self.traj_estimator_save_path + "/model.pt")
+
+                pass
+                # torch.save(self.traj_estimator.state_dict(), self.traj_estimator_save_path + "/model.pt")
 
         self.apply_force = False
         if self.apply_force == True:
