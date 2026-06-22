@@ -690,6 +690,7 @@ class AllegroHandDynamicHandover(BaseTask):
         self.total_steps = 0
         self.success_buf = torch.zeros_like(self.rew_buf)
         self.hit_success_buf = torch.zeros_like(self.rew_buf)
+        self.episode_success_buf = torch.zeros_like(self.rew_buf)
 
     def get_internal_state(self):
         return self.root_state_tensor[self.object_indices, 3:7]
@@ -716,6 +717,17 @@ class AllegroHandDynamicHandover(BaseTask):
 
         self.extras['successes'] = self.successes
         self.extras['consecutive_successes'] = self.consecutive_successes
+        goal_dist_for_log = torch.norm(self.goal_pos - self.object_pos, p=2, dim=-1)
+        current_success = (goal_dist_for_log <= self.success_tolerance).float()
+        self.episode_success_buf = torch.maximum(self.episode_success_buf, current_success)
+        self.extras['episode_success'] = self.episode_success_buf.clone()
+        self.extras['current_success_rate'] = current_success.mean().unsqueeze(0)
+        self.extras['mean_goal_dist'] = goal_dist_for_log.mean().unsqueeze(0)
+        self.episode_success_buf = torch.where(
+            self.reset_buf > 0,
+            torch.zeros_like(self.episode_success_buf),
+            self.episode_success_buf,
+        )
 
         self.total_steps += 1
 

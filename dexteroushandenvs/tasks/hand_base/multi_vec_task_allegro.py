@@ -124,7 +124,9 @@ class MultiVecTaskPythonAllegro(MultiVecTaskAllegro):
         state_all = torch.transpose(torch.stack(agent_state), 1, 0)
         reward_all = torch.transpose(torch.stack(sub_agent_reward), 1, 0)
         done_all = torch.transpose(torch.stack(sub_agent_done), 1, 0)
-        info_all = torch.stack(sub_agent_info)
+        info_all = {}
+        for k, v in self.task.extras.items():
+            info_all[k] = v.detach().clone() if torch.is_tensor(v) else v
 
         return obs_all, state_all, reward_all, done_all, info_all, None
 

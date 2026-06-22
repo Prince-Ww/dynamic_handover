@@ -123,6 +123,7 @@ class Runner:
                 self.trainer.policy.lr_decay(episode, episodes)
 
             done_episodes_rewards = []
+            done_episode_successes = []
 
             for step in range(self.episode_length):
                 # Sample actions
@@ -130,6 +131,9 @@ class Runner:
 
                 # Obser reward and next obs
                 obs, share_obs, rewards, dones, infos, _ = self.envs.step(actions)
+                episode_success = None
+                if isinstance(infos, dict) and "episode_success" in infos:
+                    episode_success = infos["episode_success"].to(self.device).flatten()
                 
                 dones_env = torch.all(dones, dim=1)
 
@@ -140,6 +144,8 @@ class Runner:
                 for t in range(self.n_rollout_threads):
                     if dones_env[t]:
                         done_episodes_rewards.append(train_episode_rewards[:, t].clone())
+                        if episode_success is not None:
+                            done_episode_successes.append(episode_success[t].clone())
                         train_episode_rewards[:, t] = 0
 
                 data = obs, share_obs, rewards, dones, infos, \
@@ -179,7 +185,18 @@ class Runner:
                 self.writter.add_scalar("train_episode_rewards", aver_episode_rewards,
                                             total_num_steps)
                 self.writter.add_scalar("train_episode_fps", int(total_num_steps / (end - start)),
-                                            total_num_steps)                            
+                                            total_num_steps)
+
+            if len(done_episode_successes) != 0:
+                aver_success_rate = torch.stack(done_episode_successes).float().mean().cpu().numpy().tolist()
+                print("some episodes done, average success rate: ", aver_success_rate)
+                self.writter.add_scalar("train_episode_success_rate", aver_success_rate, total_num_steps)
+
+            if isinstance(infos, dict) and "mean_goal_dist" in infos:
+                self.writter.add_scalar("train_mean_goal_dist", infos["mean_goal_dist"].mean().item(), total_num_steps)
+
+            if isinstance(infos, dict) and "current_success_rate" in infos:
+                self.writter.add_scalar("train_current_success_rate", infos["current_success_rate"].mean().item(), total_num_steps)
 
             # eval
             if episode % self.eval_interval == 0 and self.use_eval:
