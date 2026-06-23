@@ -51,6 +51,7 @@ class Runner:
         self.eval_interval = config["eval_interval"]
         self.eval_episodes = config["eval_episodes"]
         self.log_interval = config["log_interval"]
+        self.freeze_policy = config.get("freeze_policy", False)
 
         self.seed = self.envs.task.cfg["seed"]
         self.model_dir = model_dir
@@ -156,13 +157,16 @@ class Runner:
                 self.insert(data)
 
             # compute return and update network
-            self.compute()
-            train_infos = self.train()
+            if self.freeze_policy:
+                train_infos = [{} for _ in range(self.num_agents)]
+            else:
+                self.compute()
+                train_infos = self.train()
 
             # post process
             total_num_steps = (episode + 1) * self.episode_length * self.n_rollout_threads
             # save model
-            if (episode % self.save_interval == 0 or episode == episodes - 1):
+            if not self.freeze_policy and (episode % self.save_interval == 0 or episode == episodes - 1):
                 self.save(episode)
 
             # log information
@@ -197,6 +201,9 @@ class Runner:
 
             if isinstance(infos, dict) and "current_success_rate" in infos:
                 self.writter.add_scalar("train_current_success_rate", infos["current_success_rate"].mean().item(), total_num_steps)
+
+            if isinstance(infos, dict) and "pos_loss" in infos:
+                self.writter.add_scalar("train_traj_estimator_pos_loss", infos["pos_loss"].mean().item(), total_num_steps)
 
             # eval
             if episode % self.eval_interval == 0 and self.use_eval:

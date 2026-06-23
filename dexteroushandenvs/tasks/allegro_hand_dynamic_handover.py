@@ -670,8 +670,9 @@ class AllegroHandDynamicHandover(BaseTask):
         self.debug_qpos = []
 
         self.traj_estimator = TrajEstimator(input_dim=60, output_dim=3).to(self.device)
+        self.train_estimator = self.cfg.get("train_estimator", False)
         for param in self.traj_estimator.parameters():
-            param.requires_grad_(True)
+            param.requires_grad_(self.train_estimator)
 
         self.is_test = self.cfg["is_test"]
 
@@ -685,7 +686,10 @@ class AllegroHandDynamicHandover(BaseTask):
             self.traj_estimator.eval()
         else:
             # self.traj_estimator.load_state_dict(torch.load("./traj_e/model_perfect.pt", map_location='cuda:0'))
-            self.traj_estimator.train()
+            if self.train_estimator:
+                self.traj_estimator.train()
+            else:
+                self.traj_estimator.eval()
 
         self.total_steps = 0
         self.success_buf = torch.zeros_like(self.rew_buf)
@@ -823,7 +827,8 @@ class AllegroHandDynamicHandover(BaseTask):
 
         with TemporaryGrad():
             self.predict_pose, self.pose_latent_vector = self.predict_contact_pose(self.traj_estimator, self.object_state_stack_frames)
-            # self.update_contact_slamer(self.predict_pose)
+            if self.train_estimator:
+                self.update_contact_slamer(self.predict_pose)
 
         # self.obs_buf[:, 260:263] = self.predict_pose[:, 0:3].detach()
         self.obs_buf[:, 260:263] = (self.goal_pos - self.allegro_right_hand_base_pos).clone()
@@ -1053,12 +1058,10 @@ class AllegroHandDynamicHandover(BaseTask):
                                                      gymtorch.unwrap_tensor(self.root_state_tensor),
                                                      gymtorch.unwrap_tensor(object_indices.to(torch.int32)), len(object_indices.to(torch.int32)))
 
-        if self.total_steps % (200 * (self.max_episode_length - 1)) == 0:
+        if self.train_estimator and self.total_steps % (200 * (self.max_episode_length - 1)) == 0:
             iter = int(self.total_steps / (200 * (self.max_episode_length - 1)))
             if not self.is_test:
-
-                pass
-                # torch.save(self.traj_estimator.state_dict(), self.traj_estimator_save_path + "/model.pt")
+                torch.save(self.traj_estimator.state_dict(), self.traj_estimator_save_path + "/model.pt")
 
         self.apply_force = False
         if self.apply_force == True:

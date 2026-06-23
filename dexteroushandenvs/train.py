@@ -27,10 +27,12 @@ def train():
     if args.algo in ["mappo", "happo", "hatrpo", "maddpg", "ippo"]:
         # maddpg exists a bug now
         args.task_type = "MultiAgent"
-        if args.model_dir != "":
+        if args.model_dir != "" and not args.train_estimator:
             cfg["is_test"] = True
         else:
             cfg["is_test"] = False
+        cfg["train_estimator"] = args.train_estimator
+        cfg_train["freeze_policy"] = args.freeze_policy
 
         task, env = parse_task(args, cfg, cfg_train, sim_params, agent_index)
 
@@ -43,10 +45,12 @@ def train():
             runner.run()
 
     elif args.algo in ["ppo", "ddpg", "sac", "td3", "trpo"]:
-        if args.model_dir != "":
+        if args.model_dir != "" and not args.train_estimator:
             cfg["is_test"] = True
         else:
             cfg["is_test"] = False
+        cfg["train_estimator"] = args.train_estimator
+        cfg_train["freeze_policy"] = args.freeze_policy
 
         task, env = parse_task(args, cfg, cfg_train, sim_params, agent_index)
 

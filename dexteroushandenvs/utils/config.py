@@ -326,6 +326,18 @@ def get_args(benchmark=False, use_rlg_config=False):
         {"name": "--algo", "type": str, "default": "maddpg", "help": "Choose an algorithm"},
         {"name": "--model_dir", "type": str, "default": "", "help": "Choose a model dir"},
         {
+            "name": "--train_estimator",
+            "action": "store_true",
+            "default": False,
+            "help": "Train the trajectory/goal estimator instead of loading it for evaluation",
+        },
+        {
+            "name": "--freeze_policy",
+            "action": "store_true",
+            "default": False,
+            "help": "Freeze policy updates while collecting rollouts, useful for estimator-only training",
+        },
+        {
             "name": "--before_checkpoint",
             "type": str,
             "default": "",
