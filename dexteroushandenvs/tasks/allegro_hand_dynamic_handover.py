@@ -671,6 +671,11 @@ class AllegroHandDynamicHandover(BaseTask):
 
         self.traj_estimator = TrajEstimator(input_dim=60, output_dim=3).to(self.device)
         self.train_estimator = self.cfg.get("train_estimator", False)
+        self.use_traj_estimator = self.cfg.get("use_traj_estimator", False)
+        self.freeze_estimator = self.cfg.get("freeze_estimator", False)
+        self.traj_estimator_model_path = self.cfg.get("traj_estimator_model", "./traj_e/model.pt")
+        if self.train_estimator and self.freeze_estimator:
+            raise ValueError("--train_estimator and --freeze_estimator cannot be used together")
         for param in self.traj_estimator.parameters():
             param.requires_grad_(self.train_estimator)
 
@@ -681,8 +686,12 @@ class AllegroHandDynamicHandover(BaseTask):
         os.makedirs(self.traj_estimator_save_path, exist_ok=True)
         self.bce_logits_loss = torch.nn.BCEWithLogitsLoss()
 
-        if self.is_test:
-            self.traj_estimator.load_state_dict(torch.load("./traj_e/model.pt", map_location='cuda:0'))
+        if self.use_traj_estimator or self.is_test:
+            if not os.path.exists(self.traj_estimator_model_path):
+                raise FileNotFoundError(
+                    "Trajectory estimator checkpoint not found: {}".format(self.traj_estimator_model_path)
+                )
+            self.traj_estimator.load_state_dict(torch.load(self.traj_estimator_model_path, map_location=self.device))
             self.traj_estimator.eval()
         else:
             # self.traj_estimator.load_state_dict(torch.load("./traj_e/model_perfect.pt", map_location='cuda:0'))
@@ -825,13 +834,24 @@ class AllegroHandDynamicHandover(BaseTask):
             else:
                 self.object_state_stack_frames[:, (i)*3:(i+1)*3] = self.object_state_stack_frames[:, (i+1)*3:(i+2)*3].clone()
 
-        with TemporaryGrad():
-            self.predict_pose, self.pose_latent_vector = self.predict_contact_pose(self.traj_estimator, self.object_state_stack_frames)
-            if self.train_estimator:
+        if self.train_estimator:
+            with TemporaryGrad():
+                self.predict_pose, self.pose_latent_vector = self.predict_contact_pose(self.traj_estimator, self.object_state_stack_frames)
                 self.update_contact_slamer(self.predict_pose)
+        else:
+            with torch.no_grad():
+                self.predict_pose, self.pose_latent_vector = self.predict_contact_pose(self.traj_estimator, self.object_state_stack_frames)
+                if self.use_traj_estimator:
+                    estimator_pos_loss = F.mse_loss(
+                        self.predict_pose[:, 0:3],
+                        (self.goal_pos - self.allegro_right_hand_base_pos).clone(),
+                    )
+                    self.extras['pos_loss'] = estimator_pos_loss.unsqueeze(0)
 
-        # self.obs_buf[:, 260:263] = self.predict_pose[:, 0:3].detach()
-        self.obs_buf[:, 260:263] = (self.goal_pos - self.allegro_right_hand_base_pos).clone()
+        if self.use_traj_estimator:
+            self.obs_buf[:, 260:263] = self.predict_pose[:, 0:3].detach()
+        else:
+            self.obs_buf[:, 260:263] = (self.goal_pos - self.allegro_right_hand_base_pos).clone()
         self.obs_buf[:, 248:260] = self.object_state_stack_frames[:, 36:48].clone() + rand_floats[:, 0:12] * 0.05
 
         for i in range(len(self.obs_buf_stack_frames) - 1):

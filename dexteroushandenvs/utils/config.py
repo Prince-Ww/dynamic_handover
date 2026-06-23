@@ -338,6 +338,24 @@ def get_args(benchmark=False, use_rlg_config=False):
             "help": "Freeze policy updates while collecting rollouts, useful for estimator-only training",
         },
         {
+            "name": "--use_traj_estimator",
+            "action": "store_true",
+            "default": False,
+            "help": "Use the trained trajectory/goal estimator as the catcher goal input",
+        },
+        {
+            "name": "--freeze_estimator",
+            "action": "store_true",
+            "default": False,
+            "help": "Freeze the trajectory/goal estimator parameters during policy training",
+        },
+        {
+            "name": "--traj_estimator_model",
+            "type": str,
+            "default": "./traj_e/model.pt",
+            "help": "Path to the trained trajectory/goal estimator checkpoint",
+        },
+        {
             "name": "--before_checkpoint",
             "type": str,
             "default": "",
