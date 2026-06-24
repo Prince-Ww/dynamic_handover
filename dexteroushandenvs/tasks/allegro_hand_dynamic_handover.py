@@ -682,11 +682,11 @@ class AllegroHandDynamicHandover(BaseTask):
         self.is_test = self.cfg["is_test"]
 
         self.traj_estimator_optimizer = torch.optim.Adam(self.traj_estimator.parameters(), lr=0.0003)
-        self.traj_estimator_save_path = "./traj_e/"
+        self.traj_estimator_save_path = self.cfg.get("traj_estimator_save_dir", "./traj_e")
         os.makedirs(self.traj_estimator_save_path, exist_ok=True)
         self.bce_logits_loss = torch.nn.BCEWithLogitsLoss()
 
-        if self.use_traj_estimator or self.is_test:
+        if (self.use_traj_estimator and not self.train_estimator) or self.is_test:
             if not os.path.exists(self.traj_estimator_model_path):
                 raise FileNotFoundError(
                     "Trajectory estimator checkpoint not found: {}".format(self.traj_estimator_model_path)
@@ -734,7 +734,6 @@ class AllegroHandDynamicHandover(BaseTask):
         current_success = (goal_dist_for_log <= self.success_tolerance).float()
         self.episode_success_buf = torch.maximum(self.episode_success_buf, current_success)
         self.extras['episode_success'] = self.episode_success_buf.clone()
-        self.extras['current_success_rate'] = current_success.mean().unsqueeze(0)
         self.extras['mean_goal_dist'] = goal_dist_for_log.mean().unsqueeze(0)
         self.episode_success_buf = torch.where(
             self.reset_buf > 0,

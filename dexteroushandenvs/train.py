@@ -20,6 +20,38 @@ import os
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 
 
+def apply_training_mode(args, cfg, cfg_train):
+    if args.joint_train_estimator_policy:
+        if args.play:
+            raise ValueError("--joint_train_estimator_policy is for training and cannot be used with --play")
+        if args.model_dir != "":
+            raise ValueError("--joint_train_estimator_policy starts from scratch, so --model_dir must be empty")
+        if args.freeze_policy or args.freeze_estimator:
+            raise ValueError("--joint_train_estimator_policy cannot be used with freeze flags")
+
+    train_estimator = args.train_estimator or args.joint_train_estimator_policy
+    use_traj_estimator = args.use_traj_estimator or args.joint_train_estimator_policy
+
+    cfg["is_test"] = args.play
+    cfg["train_estimator"] = train_estimator
+    cfg["use_traj_estimator"] = use_traj_estimator
+    cfg["freeze_estimator"] = args.freeze_estimator
+    cfg["traj_estimator_model"] = args.traj_estimator_model
+    cfg["traj_estimator_save_dir"] = args.traj_estimator_save_dir
+    cfg_train["freeze_policy"] = args.freeze_policy
+
+    if args.joint_train_estimator_policy:
+        training_mode = "joint_policy_estimator_from_scratch"
+    elif train_estimator and args.freeze_policy:
+        training_mode = "estimator_only"
+    elif use_traj_estimator:
+        training_mode = "policy_with_estimator"
+    else:
+        training_mode = "policy_with_predefined_goal"
+
+    print("Training mode: ", training_mode)
+
+
 def train():
     print("Algorithm: ", args.algo)
     agent_index = get_AgentIndex(cfg)
@@ -27,12 +59,7 @@ def train():
     if args.algo in ["mappo", "happo", "hatrpo", "maddpg", "ippo"]:
         # maddpg exists a bug now
         args.task_type = "MultiAgent"
-        cfg["is_test"] = args.play
-        cfg["train_estimator"] = args.train_estimator
-        cfg["use_traj_estimator"] = args.use_traj_estimator
-        cfg["freeze_estimator"] = args.freeze_estimator
-        cfg["traj_estimator_model"] = args.traj_estimator_model
-        cfg_train["freeze_policy"] = args.freeze_policy
+        apply_training_mode(args, cfg, cfg_train)
 
         task, env = parse_task(args, cfg, cfg_train, sim_params, agent_index)
 
@@ -45,12 +72,7 @@ def train():
             runner.run()
 
     elif args.algo in ["ppo", "ddpg", "sac", "td3", "trpo"]:
-        cfg["is_test"] = args.play
-        cfg["train_estimator"] = args.train_estimator
-        cfg["use_traj_estimator"] = args.use_traj_estimator
-        cfg["freeze_estimator"] = args.freeze_estimator
-        cfg["traj_estimator_model"] = args.traj_estimator_model
-        cfg_train["freeze_policy"] = args.freeze_policy
+        apply_training_mode(args, cfg, cfg_train)
 
         task, env = parse_task(args, cfg, cfg_train, sim_params, agent_index)
 

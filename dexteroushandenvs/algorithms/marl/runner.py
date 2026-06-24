@@ -199,9 +199,6 @@ class Runner:
             if isinstance(infos, dict) and "mean_goal_dist" in infos:
                 self.writter.add_scalar("train_mean_goal_dist", infos["mean_goal_dist"].mean().item(), total_num_steps)
 
-            if isinstance(infos, dict) and "current_success_rate" in infos:
-                self.writter.add_scalar("train_current_success_rate", infos["current_success_rate"].mean().item(), total_num_steps)
-
             if isinstance(infos, dict) and "pos_loss" in infos:
                 self.writter.add_scalar("train_traj_estimator_pos_loss", infos["pos_loss"].mean().item(), total_num_steps)
 

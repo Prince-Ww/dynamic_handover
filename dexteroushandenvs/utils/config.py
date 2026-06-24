@@ -356,6 +356,18 @@ def get_args(benchmark=False, use_rlg_config=False):
             "help": "Path to the trained trajectory/goal estimator checkpoint",
         },
         {
+            "name": "--traj_estimator_save_dir",
+            "type": str,
+            "default": "./traj_e",
+            "help": "Directory for saving the trajectory/goal estimator during estimator training",
+        },
+        {
+            "name": "--joint_train_estimator_policy",
+            "action": "store_true",
+            "default": False,
+            "help": "Train policy and goal estimator jointly from scratch, matching the released-code training mode",
+        },
+        {
             "name": "--before_checkpoint",
             "type": str,
             "default": "",
