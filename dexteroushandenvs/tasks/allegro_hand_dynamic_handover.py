@@ -702,6 +702,15 @@ class AllegroHandDynamicHandover(BaseTask):
         self.success_buf = torch.zeros_like(self.rew_buf)
         self.hit_success_buf = torch.zeros_like(self.rew_buf)
         self.episode_success_buf = torch.zeros_like(self.rew_buf)
+        self.hit_dist_threshold = self.cfg["env"].get("hitDistThreshold", 0.16)
+        self.catch_dist_threshold = self.cfg["env"].get("catchDistThreshold", 0.18)
+        self.hit_contact_force_threshold = self.cfg["env"].get("hitContactForceThreshold", 0.2)
+        self.catch_contact_force_threshold = self.cfg["env"].get("catchContactForceThreshold", 0.2)
+        self.catch_speed_threshold = self.cfg["env"].get("catchSpeedThreshold", 1.0)
+        self.catch_hold_steps = self.cfg["env"].get("catchHoldSteps", 3)
+        self.episode_hit_success_buf = torch.zeros_like(self.rew_buf)
+        self.episode_catch_success_buf = torch.zeros_like(self.rew_buf)
+        self.catch_hold_buf = torch.zeros_like(self.rew_buf)
 
     def get_internal_state(self):
         return self.root_state_tensor[self.object_indices, 3:7]
@@ -733,6 +742,7 @@ class AllegroHandDynamicHandover(BaseTask):
         self.episode_success_buf = torch.maximum(self.episode_success_buf, current_success)
         self.extras['episode_success'] = self.episode_success_buf.clone()
         self.extras['mean_goal_dist'] = goal_dist_for_log.mean().unsqueeze(0)
+        self.update_hit_catch_success_metrics()
         self.episode_success_buf = torch.where(
             self.reset_buf > 0,
             torch.zeros_like(self.episode_success_buf),
@@ -752,6 +762,59 @@ class AllegroHandDynamicHandover(BaseTask):
             if self.total_resets > 0:
                 print("Post-Reset average consecutive successes = {:.1f}".format(self.total_successes/self.total_resets))
 
+    def update_hit_catch_success_metrics(self):
+        contacts = self.contact_tensor.reshape(self.num_envs, -1, 3)
+        catcher_contacts = contacts[:, self.sensor_handle_indices.to(device=self.device), :]
+        catcher_contact_force = torch.norm(catcher_contacts, dim=-1).max(dim=-1).values
+
+        palm_dist = torch.norm(self.object_pos - self.a_hand_palm_pos, p=2, dim=-1)
+        object_relative_speed = torch.norm(self.object_linvel - self.a_hand_palm_linvel, p=2, dim=-1)
+        object_above_ground = self.object_pos[:, 2] > 0.15
+
+        hit_now = torch.logical_and(
+            palm_dist <= self.hit_dist_threshold,
+            torch.logical_and(catcher_contact_force >= self.hit_contact_force_threshold, object_above_ground),
+        )
+
+        catch_condition = torch.logical_and(
+            palm_dist <= self.catch_dist_threshold,
+            torch.logical_and(
+                catcher_contact_force >= self.catch_contact_force_threshold,
+                torch.logical_and(object_relative_speed <= self.catch_speed_threshold, object_above_ground),
+            ),
+        )
+        self.catch_hold_buf = torch.where(
+            catch_condition,
+            self.catch_hold_buf + 1.0,
+            torch.zeros_like(self.catch_hold_buf),
+        )
+        catch_now = self.catch_hold_buf >= float(self.catch_hold_steps)
+
+        self.episode_hit_success_buf = torch.maximum(self.episode_hit_success_buf, torch.logical_or(hit_now, catch_now).float())
+        self.episode_catch_success_buf = torch.maximum(self.episode_catch_success_buf, catch_now.float())
+        self.extras['episode_hit_success'] = self.episode_hit_success_buf.clone()
+        self.extras['episode_catch_success'] = self.episode_catch_success_buf.clone()
+        self.extras['mean_catcher_palm_dist'] = palm_dist.mean().unsqueeze(0)
+        self.extras['mean_catcher_contact_force'] = catcher_contact_force.mean().unsqueeze(0)
+        self.extras['mean_object_palm_relative_speed'] = object_relative_speed.mean().unsqueeze(0)
+
+        reset_mask = self.reset_buf > 0
+        self.episode_hit_success_buf = torch.where(
+            reset_mask,
+            torch.zeros_like(self.episode_hit_success_buf),
+            self.episode_hit_success_buf,
+        )
+        self.episode_catch_success_buf = torch.where(
+            reset_mask,
+            torch.zeros_like(self.episode_catch_success_buf),
+            self.episode_catch_success_buf,
+        )
+        self.catch_hold_buf = torch.where(
+            reset_mask,
+            torch.zeros_like(self.catch_hold_buf),
+            self.catch_hold_buf,
+        )
+
     def compute_observations(self):
         self.gym.refresh_dof_state_tensor(self.sim)
         self.gym.refresh_actor_root_state_tensor(self.sim)
@@ -769,6 +832,7 @@ class AllegroHandDynamicHandover(BaseTask):
         self.allegro_left_hand_rot = self.rigid_body_states[:, 6 + 23, 3:7]
 
         self.a_hand_palm_pos = self.allegro_left_hand_pos.clone()
+        self.a_hand_palm_linvel = self.rigid_body_states[:, 6 + 23, 7:10]
 
         self.allegro_left_hand_pos = self.allegro_left_hand_pos + quat_apply(self.allegro_left_hand_rot, to_torch([0, 1, 0], device=self.device).repeat(self.num_envs, 1) * 0.08)
         self.allegro_left_hand_pos = self.allegro_left_hand_pos + quat_apply(self.allegro_left_hand_rot, to_torch([0, 0, 1], device=self.device).repeat(self.num_envs, 1) * 0.04)
@@ -1014,6 +1078,9 @@ class AllegroHandDynamicHandover(BaseTask):
         self.reset_buf[env_ids] = 0
         self.successes[env_ids] = 0
         self.episode_success_buf[env_ids] = 0
+        self.episode_hit_success_buf[env_ids] = 0
+        self.episode_catch_success_buf[env_ids] = 0
+        self.catch_hold_buf[env_ids] = 0
 
         self.proprioception_close_loop[env_ids] = self.allegro_hand_dof_pos[env_ids, 0:22].clone()
 

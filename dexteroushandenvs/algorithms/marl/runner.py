@@ -125,6 +125,8 @@ class Runner:
 
             done_episodes_rewards = []
             done_episode_successes = []
+            done_episode_hit_successes = []
+            done_episode_catch_successes = []
 
             for step in range(self.episode_length):
                 # Sample actions
@@ -133,8 +135,15 @@ class Runner:
                 # Obser reward and next obs
                 obs, share_obs, rewards, dones, infos, _ = self.envs.step(actions)
                 episode_success = None
-                if isinstance(infos, dict) and "episode_success" in infos:
-                    episode_success = infos["episode_success"].to(self.device).flatten()
+                episode_hit_success = None
+                episode_catch_success = None
+                if isinstance(infos, dict):
+                    if "episode_success" in infos:
+                        episode_success = infos["episode_success"].to(self.device).flatten()
+                    if "episode_hit_success" in infos:
+                        episode_hit_success = infos["episode_hit_success"].to(self.device).flatten()
+                    if "episode_catch_success" in infos:
+                        episode_catch_success = infos["episode_catch_success"].to(self.device).flatten()
                 
                 dones_env = torch.all(dones, dim=1)
 
@@ -147,6 +156,10 @@ class Runner:
                         done_episodes_rewards.append(train_episode_rewards[:, t].clone())
                         if episode_success is not None:
                             done_episode_successes.append(episode_success[t].clone())
+                        if episode_hit_success is not None:
+                            done_episode_hit_successes.append(episode_hit_success[t].clone())
+                        if episode_catch_success is not None:
+                            done_episode_catch_successes.append(episode_catch_success[t].clone())
                         train_episode_rewards[:, t] = 0
 
                 data = obs, share_obs, rewards, dones, infos, \
@@ -193,11 +206,30 @@ class Runner:
 
             if len(done_episode_successes) != 0:
                 aver_success_rate = torch.stack(done_episode_successes).float().mean().cpu().numpy().tolist()
-                print("some episodes done, average success rate: ", aver_success_rate)
+                print("some episodes done, average goal success rate: ", aver_success_rate)
                 self.writter.add_scalar("train_episode_success_rate", aver_success_rate, total_num_steps)
+
+            if len(done_episode_hit_successes) != 0:
+                aver_hit_rate = torch.stack(done_episode_hit_successes).float().mean().cpu().numpy().tolist()
+                print("some episodes done, average hit rate: ", aver_hit_rate)
+                self.writter.add_scalar("train_episode_hr", aver_hit_rate, total_num_steps)
+
+            if len(done_episode_catch_successes) != 0:
+                aver_catch_success_rate = torch.stack(done_episode_catch_successes).float().mean().cpu().numpy().tolist()
+                print("some episodes done, average catch success rate: ", aver_catch_success_rate)
+                self.writter.add_scalar("train_episode_sr", aver_catch_success_rate, total_num_steps)
 
             if isinstance(infos, dict) and "mean_goal_dist" in infos:
                 self.writter.add_scalar("train_mean_goal_dist", infos["mean_goal_dist"].mean().item(), total_num_steps)
+
+            if isinstance(infos, dict) and "mean_catcher_palm_dist" in infos:
+                self.writter.add_scalar("train_mean_catcher_palm_dist", infos["mean_catcher_palm_dist"].mean().item(), total_num_steps)
+
+            if isinstance(infos, dict) and "mean_catcher_contact_force" in infos:
+                self.writter.add_scalar("train_mean_catcher_contact_force", infos["mean_catcher_contact_force"].mean().item(), total_num_steps)
+
+            if isinstance(infos, dict) and "mean_object_palm_relative_speed" in infos:
+                self.writter.add_scalar("train_mean_object_palm_relative_speed", infos["mean_object_palm_relative_speed"].mean().item(), total_num_steps)
 
             if isinstance(infos, dict) and "pos_loss" in infos:
                 self.writter.add_scalar("train_traj_estimator_pos_loss", infos["pos_loss"].mean().item(), total_num_steps)
