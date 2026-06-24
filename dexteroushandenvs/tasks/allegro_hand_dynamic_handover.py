@@ -692,13 +692,11 @@ class AllegroHandDynamicHandover(BaseTask):
                     "Trajectory estimator checkpoint not found: {}".format(self.traj_estimator_model_path)
                 )
             self.traj_estimator.load_state_dict(torch.load(self.traj_estimator_model_path, map_location=self.device))
-            self.traj_estimator.eval()
+
+        if self.train_estimator:
+            self.traj_estimator.train()
         else:
-            # self.traj_estimator.load_state_dict(torch.load("./traj_e/model_perfect.pt", map_location='cuda:0'))
-            if self.train_estimator:
-                self.traj_estimator.train()
-            else:
-                self.traj_estimator.eval()
+            self.traj_estimator.eval()
 
         self.total_steps = 0
         self.success_buf = torch.zeros_like(self.rew_buf)
@@ -1015,6 +1013,7 @@ class AllegroHandDynamicHandover(BaseTask):
         self.progress_buf[env_ids] = 0
         self.reset_buf[env_ids] = 0
         self.successes[env_ids] = 0
+        self.episode_success_buf[env_ids] = 0
 
         self.proprioception_close_loop[env_ids] = self.allegro_hand_dof_pos[env_ids, 0:22].clone()
 
