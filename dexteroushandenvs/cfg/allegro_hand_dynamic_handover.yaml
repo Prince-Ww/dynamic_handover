@@ -40,6 +40,14 @@ env:
   successTolerance: 0.1
   printNumSuccesses: False
   maxConsecutiveSuccesses: 0
+  # HR/SR diagnostic thresholds. These do not affect the reward; they only affect
+  # train_episode_hr, train_episode_sr, and debug_hrsr_* TensorBoard metrics.
+  hitDistThreshold: 0.16
+  catchDistThreshold: 0.18
+  hitContactForceThreshold: 0.2
+  catchContactForceThreshold: 0.2
+  catchSpeedThreshold: 1.0
+  catchHoldSteps: 3
 
   asset:
     assetRoot: "../assets"

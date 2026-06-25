@@ -764,23 +764,29 @@ class AllegroHandDynamicHandover(BaseTask):
 
     def update_hit_catch_success_metrics(self):
         contacts = self.contact_tensor.reshape(self.num_envs, -1, 3)
+        all_contact_force = torch.norm(contacts, dim=-1).max(dim=-1).values
         catcher_contacts = contacts[:, self.sensor_handle_indices.to(device=self.device), :]
         catcher_contact_force = torch.norm(catcher_contacts, dim=-1).max(dim=-1).values
 
         palm_dist = torch.norm(self.object_pos - self.a_hand_palm_pos, p=2, dim=-1)
         object_relative_speed = torch.norm(self.object_linvel - self.a_hand_palm_linvel, p=2, dim=-1)
         object_above_ground = self.object_pos[:, 2] > 0.15
+        hit_dist_ok = palm_dist <= self.hit_dist_threshold
+        catch_dist_ok = palm_dist <= self.catch_dist_threshold
+        hit_contact_ok = catcher_contact_force >= self.hit_contact_force_threshold
+        catch_contact_ok = catcher_contact_force >= self.catch_contact_force_threshold
+        catch_speed_ok = object_relative_speed <= self.catch_speed_threshold
 
         hit_now = torch.logical_and(
-            palm_dist <= self.hit_dist_threshold,
-            torch.logical_and(catcher_contact_force >= self.hit_contact_force_threshold, object_above_ground),
+            hit_dist_ok,
+            torch.logical_and(hit_contact_ok, object_above_ground),
         )
 
         catch_condition = torch.logical_and(
-            palm_dist <= self.catch_dist_threshold,
+            catch_dist_ok,
             torch.logical_and(
-                catcher_contact_force >= self.catch_contact_force_threshold,
-                torch.logical_and(object_relative_speed <= self.catch_speed_threshold, object_above_ground),
+                catch_contact_ok,
+                torch.logical_and(catch_speed_ok, object_above_ground),
             ),
         )
         self.catch_hold_buf = torch.where(
@@ -797,6 +803,19 @@ class AllegroHandDynamicHandover(BaseTask):
         self.extras['mean_catcher_palm_dist'] = palm_dist.mean().unsqueeze(0)
         self.extras['mean_catcher_contact_force'] = catcher_contact_force.mean().unsqueeze(0)
         self.extras['mean_object_palm_relative_speed'] = object_relative_speed.mean().unsqueeze(0)
+        self.extras['debug_hrsr_hit_dist_rate'] = hit_dist_ok.float().mean().unsqueeze(0)
+        self.extras['debug_hrsr_catch_dist_rate'] = catch_dist_ok.float().mean().unsqueeze(0)
+        self.extras['debug_hrsr_hit_contact_rate'] = hit_contact_ok.float().mean().unsqueeze(0)
+        self.extras['debug_hrsr_catch_contact_rate'] = catch_contact_ok.float().mean().unsqueeze(0)
+        self.extras['debug_hrsr_catch_speed_rate'] = catch_speed_ok.float().mean().unsqueeze(0)
+        self.extras['debug_hrsr_above_ground_rate'] = object_above_ground.float().mean().unsqueeze(0)
+        self.extras['debug_hrsr_hit_now_rate'] = hit_now.float().mean().unsqueeze(0)
+        self.extras['debug_hrsr_catch_condition_rate'] = catch_condition.float().mean().unsqueeze(0)
+        self.extras['debug_hrsr_catch_now_rate'] = catch_now.float().mean().unsqueeze(0)
+        self.extras['debug_hrsr_min_palm_dist'] = palm_dist.min().unsqueeze(0)
+        self.extras['debug_hrsr_max_catcher_contact_force'] = catcher_contact_force.max().unsqueeze(0)
+        self.extras['debug_hrsr_max_all_contact_force'] = all_contact_force.max().unsqueeze(0)
+        self.extras['debug_hrsr_min_object_palm_relative_speed'] = object_relative_speed.min().unsqueeze(0)
 
         reset_mask = self.reset_buf > 0
         self.episode_hit_success_buf = torch.where(

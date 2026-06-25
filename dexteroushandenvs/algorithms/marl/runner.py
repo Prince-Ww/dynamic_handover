@@ -231,6 +231,25 @@ class Runner:
             if isinstance(infos, dict) and "mean_object_palm_relative_speed" in infos:
                 self.writter.add_scalar("train_mean_object_palm_relative_speed", infos["mean_object_palm_relative_speed"].mean().item(), total_num_steps)
 
+            if isinstance(infos, dict):
+                for key in [
+                    "debug_hrsr_hit_dist_rate",
+                    "debug_hrsr_catch_dist_rate",
+                    "debug_hrsr_hit_contact_rate",
+                    "debug_hrsr_catch_contact_rate",
+                    "debug_hrsr_catch_speed_rate",
+                    "debug_hrsr_above_ground_rate",
+                    "debug_hrsr_hit_now_rate",
+                    "debug_hrsr_catch_condition_rate",
+                    "debug_hrsr_catch_now_rate",
+                    "debug_hrsr_min_palm_dist",
+                    "debug_hrsr_max_catcher_contact_force",
+                    "debug_hrsr_max_all_contact_force",
+                    "debug_hrsr_min_object_palm_relative_speed",
+                ]:
+                    if key in infos:
+                        self.writter.add_scalar(key, infos[key].mean().item(), total_num_steps)
+
             if isinstance(infos, dict) and "pos_loss" in infos:
                 self.writter.add_scalar("train_traj_estimator_pos_loss", infos["pos_loss"].mean().item(), total_num_steps)
 
