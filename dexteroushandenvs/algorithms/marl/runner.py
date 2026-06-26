@@ -244,6 +244,10 @@ class Runner:
                     "debug_hrsr_catch_now_rate",
                     "debug_hrsr_min_palm_dist",
                     "debug_hrsr_max_catcher_contact_force",
+                    "debug_hrsr_palm_contact_rate",
+                    "debug_hrsr_finger_contact_rate",
+                    "debug_hrsr_max_palm_contact_force",
+                    "debug_hrsr_max_finger_contact_force",
                     "debug_hrsr_max_all_contact_force",
                     "debug_hrsr_min_object_palm_relative_speed",
                 ]:

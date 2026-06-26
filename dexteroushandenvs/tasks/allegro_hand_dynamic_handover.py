@@ -188,9 +188,15 @@ class AllegroHandDynamicHandover(BaseTask):
             "full_state": 300 * 3,
         }
 
-        self.contact_sensor_names = ["link_1.0_fsr", "link_2.0_fsr", "link_3.0_tip_fsr",
-                                     "link_5.0_fsr", "link_6.0_fsr", "link_7.0_tip_fsr", "link_9.0_fsr",
-                                     "link_10.0_fsr", "link_11.0_tip_fsr", "link_14.0_fsr", "link_15.0_fsr"]
+        # The currently loaded URDFs do not contain *_fsr rigid bodies, and
+        # fixed tip/palm links are collapsed by Isaac Gym. Use the closest
+        # movable finger links for contact features instead.
+        self.contact_sensor_names = ["link_1.0", "link_2.0", "link_3.0",
+                                     "link_5.0", "link_6.0", "link_7.0", "link_9.0",
+                                     "link_10.0", "link_11.0", "link_14.0", "link_15.0"]
+        self.hrsr_finger_contact_names = self.contact_sensor_names
+        # link6 is the catcher wrist/palm proxy after fixed palm links collapse.
+        self.hrsr_palm_contact_names = ["link6"]
 
         self.up_axis = 'z'
 
@@ -354,6 +360,28 @@ class AllegroHandDynamicHandover(BaseTask):
         self.create_object_asset_dict(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../assets'))
         self._create_ground_plane()
         self._create_envs(self.num_envs, self.cfg["env"]['envSpacing'], int(np.sqrt(self.num_envs)))
+
+    def _find_contact_body_indices(self, env_ptr, actor_handle, body_names, label):
+        body_indices = []
+        missing_names = []
+        for body_name in body_names:
+            body_index = self.gym.find_actor_rigid_body_index(
+                env_ptr, actor_handle, body_name, gymapi.DOMAIN_ENV
+            )
+            if body_index < 0:
+                missing_names.append(body_name)
+            else:
+                body_indices.append(body_index)
+
+        if missing_names:
+            raise RuntimeError(
+                "{} contact bodies were not found in the loaded URDF after Isaac Gym processing: {}".format(
+                    label, missing_names
+                )
+            )
+
+        print("{} contact body indices: {}".format(label, list(zip(body_names, body_indices))))
+        return to_torch(body_indices, dtype=torch.int64, device=self.device)
 
     def _create_ground_plane(self):
         plane_params = gymapi.PlaneParams()
@@ -532,6 +560,8 @@ class AllegroHandDynamicHandover(BaseTask):
         self.goal_object_indices = []
         self.predict_goal_object_indices = []
 
+        first_another_hand_actor = None
+
         for i in range(self.num_envs):
             # create env instance
             env_ptr = self.gym.create_env(
@@ -544,6 +574,8 @@ class AllegroHandDynamicHandover(BaseTask):
             # add hand - collision filter = -1 to use asset collision filters set in mjcf loader
             allegro_hand_actor = self.gym.create_actor(env_ptr, allegro_hand_asset, allegro_hand_start_pose, "hand", i, -1, 0)
             allegro_hand_another_actor = self.gym.create_actor(env_ptr, allegro_hand_another_asset, allegro_another_hand_start_pose, "another_hand", i, -1, 0)
+            if i == 0:
+                first_another_hand_actor = allegro_hand_another_actor
 
             self.hand_start_states.append([allegro_hand_start_pose.p.x, allegro_hand_start_pose.p.y, allegro_hand_start_pose.p.z,
                                            allegro_hand_start_pose.r.x, allegro_hand_start_pose.r.y, allegro_hand_start_pose.r.z, allegro_hand_start_pose.r.w,
@@ -631,10 +663,15 @@ class AllegroHandDynamicHandover(BaseTask):
                 self.camera_proj_matrixs.append(cam_proj)
                 self.cameras.append(camera_handle)
 
-        sensor_handles = [self.gym.find_actor_rigid_body_handle(env_ptr, allegro_hand_another_actor, sensor_name) for sensor_name in
-                          self.contact_sensor_names]
-
-        self.sensor_handle_indices = to_torch(sensor_handles, dtype=torch.int64)
+        self.sensor_handle_indices = self._find_contact_body_indices(
+            self.envs[0], first_another_hand_actor, self.contact_sensor_names, "critic/finger"
+        )
+        self.hrsr_finger_contact_indices = self._find_contact_body_indices(
+            self.envs[0], first_another_hand_actor, self.hrsr_finger_contact_names, "HR/SR finger"
+        )
+        self.hrsr_palm_contact_indices = self._find_contact_body_indices(
+            self.envs[0], first_another_hand_actor, self.hrsr_palm_contact_names, "HR/SR palm"
+        )
 
         object_rb_props = self.gym.get_actor_rigid_body_properties(env_ptr, object_handle)
         self.object_rb_masses = [prop.mass for prop in object_rb_props]
@@ -702,12 +739,13 @@ class AllegroHandDynamicHandover(BaseTask):
         self.success_buf = torch.zeros_like(self.rew_buf)
         self.hit_success_buf = torch.zeros_like(self.rew_buf)
         self.episode_success_buf = torch.zeros_like(self.rew_buf)
-        self.hit_dist_threshold = self.cfg["env"].get("hitDistThreshold", 0.16)
-        self.catch_dist_threshold = self.cfg["env"].get("catchDistThreshold", 0.18)
-        self.hit_contact_force_threshold = self.cfg["env"].get("hitContactForceThreshold", 0.2)
-        self.catch_contact_force_threshold = self.cfg["env"].get("catchContactForceThreshold", 0.2)
-        self.catch_speed_threshold = self.cfg["env"].get("catchSpeedThreshold", 1.0)
+        self.hit_dist_threshold = self.cfg["env"].get("hitDistThreshold", 0.25)
+        self.catch_dist_threshold = self.cfg["env"].get("catchDistThreshold", 0.20)
+        self.hit_contact_force_threshold = self.cfg["env"].get("hitContactForceThreshold", 0.05)
+        self.catch_contact_force_threshold = self.cfg["env"].get("catchContactForceThreshold", 0.05)
+        self.catch_speed_threshold = self.cfg["env"].get("catchSpeedThreshold", 1.5)
         self.catch_hold_steps = self.cfg["env"].get("catchHoldSteps", 3)
+        self.object_height_threshold = self.cfg["env"].get("objectHeightThreshold", 0.15)
         self.episode_hit_success_buf = torch.zeros_like(self.rew_buf)
         self.episode_catch_success_buf = torch.zeros_like(self.rew_buf)
         self.catch_hold_buf = torch.zeros_like(self.rew_buf)
@@ -765,22 +803,28 @@ class AllegroHandDynamicHandover(BaseTask):
     def update_hit_catch_success_metrics(self):
         contacts = self.contact_tensor.reshape(self.num_envs, -1, 3)
         all_contact_force = torch.norm(contacts, dim=-1).max(dim=-1).values
-        catcher_contacts = contacts[:, self.sensor_handle_indices.to(device=self.device), :]
-        catcher_contact_force = torch.norm(catcher_contacts, dim=-1).max(dim=-1).values
+        finger_contacts = contacts[:, self.hrsr_finger_contact_indices, :]
+        palm_contacts = contacts[:, self.hrsr_palm_contact_indices, :]
+        finger_contact_force = torch.norm(finger_contacts, dim=-1).max(dim=-1).values
+        palm_contact_force = torch.norm(palm_contacts, dim=-1).max(dim=-1).values
+        catcher_contact_force = torch.maximum(finger_contact_force, palm_contact_force)
 
         palm_dist = torch.norm(self.object_pos - self.a_hand_palm_pos, p=2, dim=-1)
         object_relative_speed = torch.norm(self.object_linvel - self.a_hand_palm_linvel, p=2, dim=-1)
-        object_above_ground = self.object_pos[:, 2] > 0.15
+        object_above_ground = self.object_pos[:, 2] > self.object_height_threshold
         hit_dist_ok = palm_dist <= self.hit_dist_threshold
         catch_dist_ok = palm_dist <= self.catch_dist_threshold
-        hit_contact_ok = catcher_contact_force >= self.hit_contact_force_threshold
-        catch_contact_ok = catcher_contact_force >= self.catch_contact_force_threshold
+        hit_contact_ok = torch.logical_or(
+            finger_contact_force >= self.hit_contact_force_threshold,
+            palm_contact_force >= self.hit_contact_force_threshold,
+        )
+        catch_contact_ok = torch.logical_or(
+            finger_contact_force >= self.catch_contact_force_threshold,
+            palm_contact_force >= self.catch_contact_force_threshold,
+        )
         catch_speed_ok = object_relative_speed <= self.catch_speed_threshold
 
-        hit_now = torch.logical_and(
-            hit_dist_ok,
-            torch.logical_and(hit_contact_ok, object_above_ground),
-        )
+        hit_now = torch.logical_and(hit_dist_ok, hit_contact_ok)
 
         catch_condition = torch.logical_and(
             catch_dist_ok,
@@ -814,6 +858,10 @@ class AllegroHandDynamicHandover(BaseTask):
         self.extras['debug_hrsr_catch_now_rate'] = catch_now.float().mean().unsqueeze(0)
         self.extras['debug_hrsr_min_palm_dist'] = palm_dist.min().unsqueeze(0)
         self.extras['debug_hrsr_max_catcher_contact_force'] = catcher_contact_force.max().unsqueeze(0)
+        self.extras['debug_hrsr_palm_contact_rate'] = (palm_contact_force >= self.catch_contact_force_threshold).float().mean().unsqueeze(0)
+        self.extras['debug_hrsr_finger_contact_rate'] = (finger_contact_force >= self.catch_contact_force_threshold).float().mean().unsqueeze(0)
+        self.extras['debug_hrsr_max_palm_contact_force'] = palm_contact_force.max().unsqueeze(0)
+        self.extras['debug_hrsr_max_finger_contact_force'] = finger_contact_force.max().unsqueeze(0)
         self.extras['debug_hrsr_max_all_contact_force'] = all_contact_force.max().unsqueeze(0)
         self.extras['debug_hrsr_min_object_palm_relative_speed'] = object_relative_speed.min().unsqueeze(0)
 
