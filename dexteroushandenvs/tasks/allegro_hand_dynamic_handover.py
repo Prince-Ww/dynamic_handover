@@ -1301,7 +1301,7 @@ def compute_hand_reward(
     object_vel_reward = torch.where(object_pos[:, 1] < -0.65,
                                     torch.where(-0.85 < object_pos[:, 1], object_vel_reward, torch.zeros_like(object_vel_reward)), torch.zeros_like(object_vel_reward))
 
-    reward = (torch.exp(-4*((3 * dist_rew))) + object_vel_reward) - 0.001 * action_penalty
+    reward = torch.exp(-dist_reward_scale * dist_rew) + object_vel_reward + action_penalty_scale * action_penalty
 
     # Find out which envs hit the goal and update successes count
     goal_resets = torch.where(torch.abs(goal_dist) <= 0, torch.ones_like(reset_goal_buf), reset_goal_buf)

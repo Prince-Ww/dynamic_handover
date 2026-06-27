@@ -4,9 +4,8 @@ from .util import init, get_clones
 """MLP modules."""
 
 class MLPLayer(nn.Module):
-    def __init__(self, input_dim, hidden_size, layer_N, use_orthogonal, use_ReLU):
+    def __init__(self, input_dim, hidden_size, layer_N, use_orthogonal, use_ReLU, hidden_sizes=None):
         super(MLPLayer, self).__init__()
-        self._layer_N = layer_N
 
         # active_func = [nn.Tanh(), nn.ReLU()][use_ReLU]
         active_func = [nn.ELU(), nn.ELU()][use_ReLU]
@@ -16,23 +15,21 @@ class MLPLayer(nn.Module):
         def init_(m):
             return init(m, init_method, lambda x: nn.init.constant_(x, 0), gain=gain)
 
-        self.fc1 = nn.Sequential(
-            init_(nn.Linear(input_dim, hidden_size)), active_func, nn.LayerNorm(hidden_size))
-        # self.fc1 = nn.Sequential(
-        #     init_(nn.Linear(input_dim, hidden_size)), active_func)
-        # self.fc_h = nn.Sequential(init_(
-        #     nn.Linear(hidden_size, hidden_size)), active_func, nn.LayerNorm(hidden_size))
-        # self.fc2 = get_clones(self.fc_h, self._layer_N)
-        self.fc2 = nn.ModuleList([nn.Sequential(init_(
-            nn.Linear(hidden_size, hidden_size)), active_func, nn.LayerNorm(hidden_size)) for i in range(self._layer_N)])
-        # self.fc2 = nn.ModuleList([nn.Sequential(init_(
-        #     nn.Linear(hidden_size, hidden_size)), active_func) for i in range(self._layer_N)])
+        if hidden_sizes is None:
+            hidden_sizes = [hidden_size] * (layer_N + 1)
+        self.hidden_sizes = [int(size) for size in hidden_sizes]
+
+        layers = []
+        last_dim = input_dim
+        for size in self.hidden_sizes:
+            layers.append(init_(nn.Linear(last_dim, size)))
+            layers.append(active_func)
+            layers.append(nn.LayerNorm(size))
+            last_dim = size
+        self.net = nn.Sequential(*layers)
 
     def forward(self, x):
-        x = self.fc1(x)
-        for i in range(self._layer_N):
-            x = self.fc2[i](x)
-        return x
+        return self.net(x)
 
 
 class MLPBase(nn.Module):
@@ -45,6 +42,9 @@ class MLPBase(nn.Module):
         self._stacked_frames = config["stacked_frames"]
         self._layer_N = config["layer_N"]
         self.hidden_size = config["hidden_size"]
+        self.hidden_sizes = config.get("hidden_sizes", None)
+        if self.hidden_sizes is not None and int(self.hidden_sizes[-1]) != int(self.hidden_size):
+            raise ValueError("config['hidden_size'] must match the last entry of config['hidden_sizes']")
 
         obs_dim = obs_shape[0]
 
@@ -52,7 +52,7 @@ class MLPBase(nn.Module):
             self.feature_norm = nn.LayerNorm(obs_dim)
 
         self.mlp = MLPLayer(obs_dim, self.hidden_size,
-                              self._layer_N, self._use_orthogonal, self._use_ReLU)
+                              self._layer_N, self._use_orthogonal, self._use_ReLU, self.hidden_sizes)
         # self.mlp_middle_layer = MLPLayer(self.hidden_size, self.hidden_size,
         #                       self._layer_N, self._use_orthogonal, self._use_ReLU)
 
