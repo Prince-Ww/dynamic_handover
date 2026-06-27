@@ -85,44 +85,6 @@ task:
     actor_params:
       hand:
         color: True
-        tendon_properties:
-          damping:
-            range: [0.3, 3.0]
-            operation: "scaling"
-            distribution: "loguniform"
-            schedule: "constant"  # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
-            schedule_steps: 0
-          stiffness:
-            range: [0.75, 1.5]
-            operation: "scaling"
-            distribution: "loguniform"
-            schedule: "constant"  # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
-            schedule_steps: 0
-        dof_properties:
-          damping:
-            range: [0.3, 3.0]
-            operation: "scaling"
-            distribution: "loguniform"
-            schedule: "constant"  # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
-            schedule_steps: 0
-          stiffness:
-            range: [0.75, 1.5]
-            operation: "scaling"
-            distribution: "loguniform"
-            schedule: "constant"  # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
-            schedule_steps: 0
-          lower:
-            range: [0, 0.01]
-            operation: "additive"
-            distribution: "gaussian"
-            schedule: "constant"  # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
-            schedule_steps: 0
-          upper:
-            range: [0, 0.01]
-            operation: "additive"
-            distribution: "gaussian"
-            schedule: "constant"  # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
-            schedule_steps: 0
         rigid_body_properties:
           mass:
             range: [0.5, 1.5]
