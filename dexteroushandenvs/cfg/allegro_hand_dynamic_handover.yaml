@@ -15,7 +15,7 @@ env:
   useRelativeControl: False
   dofSpeedScale: 100.0
   actionsMovingAverage: 1.0
-  controlFrequencyInv: 6 # 120 Hz simulation / 20 Hz control
+  controlFrequencyInv: 3 # 60 Hz simulation / 20 Hz control
 
   startPositionNoise: 0.0
   startRotationNoise: 0.0
@@ -60,7 +60,7 @@ env:
 task:
   randomize: True
   randomization_params:
-    frequency: 1000   # Define how many simulation steps between generating new randomizations
+    frequency: 600   # Define how many simulation steps between generating new randomizations
     observations:
       range: [0, .002] # range for the white noise
       range_correlated: [0, .001 ] # range for correlated noise, refreshed with freq `frequency`
@@ -124,7 +124,7 @@ task:
             schedule_steps: 30000
 
 sim:
-  dt: 0.008333333333333333
+  dt: 0.016666666666666666
   substeps: 2
   physx:
     num_threads: 16

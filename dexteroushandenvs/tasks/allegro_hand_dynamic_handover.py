@@ -1297,9 +1297,9 @@ def compute_hand_reward(
 
     action_penalty = torch.sum(actions ** 2, dim=-1)
 
-    object_vel_reward = torch.clamp(-object_vel[:, 1], -0.1, 0.1)
-    object_vel_reward = torch.where(object_pos[:, 1] < -0.65,
-                                    torch.where(-0.85 < object_pos[:, 1], object_vel_reward, torch.zeros_like(object_vel_reward)), torch.zeros_like(object_vel_reward))
+    throw_to_catch_dir = a_hand_palm_pos - allegro_right_hand_pos
+    throw_to_catch_dir = throw_to_catch_dir / torch.clamp(torch.norm(throw_to_catch_dir, p=2, dim=-1, keepdim=True), min=1.0e-6)
+    object_vel_reward = torch.clamp(torch.sum(object_vel * throw_to_catch_dir, dim=-1), -0.1, 0.1)
 
     reward = torch.exp(-dist_reward_scale * dist_rew) + object_vel_reward + action_penalty_scale * action_penalty
 
