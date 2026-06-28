@@ -20,7 +20,31 @@ from utils.util import update_linear_schedule
 
 def _t2n(x):
     return x.detach().cpu().numpy()
-    
+
+
+def _convert_legacy_mlp_state_dict(state_dict):
+    """Map checkpoints saved with the older fc1/fc2 MLP names to net.* names."""
+    legacy_to_current = {
+        "base.mlp.fc1.0.": "base.mlp.net.0.",
+        "base.mlp.fc1.2.": "base.mlp.net.2.",
+        "base.mlp.fc2.0.0.": "base.mlp.net.3.",
+        "base.mlp.fc2.0.2.": "base.mlp.net.5.",
+        "base.mlp.fc2.1.0.": "base.mlp.net.6.",
+        "base.mlp.fc2.1.2.": "base.mlp.net.8.",
+    }
+
+    converted = {}
+    changed = False
+    for key, value in state_dict.items():
+        new_key = key
+        for old_prefix, new_prefix in legacy_to_current.items():
+            if key.startswith(old_prefix):
+                new_key = new_prefix + key[len(old_prefix):]
+                changed = True
+                break
+        converted[new_key] = value
+    return converted, changed
+     
 class Runner:
 
     def __init__(self,
@@ -402,11 +426,20 @@ class Runner:
         for agent_id in range(self.num_agents):
             if self.use_single_network:
                 policy_model_state_dict = torch.load(str(self.model_dir) + '/model_agent' + str(agent_id) + '.pt')
+                policy_model_state_dict, converted = _convert_legacy_mlp_state_dict(policy_model_state_dict)
+                if converted:
+                    print("Converted legacy MLP checkpoint keys for model agent {}".format(agent_id))
                 self.policy[agent_id].model.load_state_dict(policy_model_state_dict)
             else:
                 policy_actor_state_dict = torch.load(str(self.model_dir) + '/actor_agent' + str(agent_id) + '.pt', map_location=self.device)
+                policy_actor_state_dict, converted_actor = _convert_legacy_mlp_state_dict(policy_actor_state_dict)
+                if converted_actor:
+                    print("Converted legacy MLP checkpoint keys for actor agent {}".format(agent_id))
                 self.policy[agent_id].actor.load_state_dict(policy_actor_state_dict)
                 policy_critic_state_dict = torch.load(str(self.model_dir) + '/critic_agent' + str(agent_id) + '.pt', map_location=self.device)
+                policy_critic_state_dict, converted_critic = _convert_legacy_mlp_state_dict(policy_critic_state_dict)
+                if converted_critic:
+                    print("Converted legacy MLP checkpoint keys for critic agent {}".format(agent_id))
                 self.policy[agent_id].critic.load_state_dict(policy_critic_state_dict)
 
     def log_train(self, train_infos, total_num_steps): 
