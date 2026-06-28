@@ -1,0 +1,82 @@
+# 60Hz environment config for FPS ablation: domain randomization disabled.
+# Keep this file separate so DR and no-DR runs cannot mix logs by accident.
+env:
+  env_name: "allegro_hand_dynamic_handover"
+  numEnvs: 2048
+  envSpacing: 1.25
+  episodeLength: 30
+  enableDebugVis: False
+  aggregateMode: 1
+  enableCameraSensors: False
+  cameraDebug: False
+  pointCloudDebug: False
+
+  stiffnessScale: 1.0
+  forceLimitScale: 1.0
+  useRelativeControl: False
+  dofSpeedScale: 100.0
+  actionsMovingAverage: 1.0
+  controlFrequencyInv: 3 # 60 Hz simulation / 20 Hz control
+
+  startPositionNoise: 0.0
+  startRotationNoise: 0.0
+
+  resetPositionNoise: 0.0
+  resetRotationNoise: 0.0
+  resetDofPosRandomInterval: 0.
+  resetDofVelRandomInterval: 0.0
+
+  distRewardScale: 10.0
+  rotRewardScale: 1.0
+  rotEps: 0.1
+  actionPenaltyScale: -0.003
+  reachGoalBonus: 250
+  fallDistance: 0.4
+  fallPenalty: 0.0
+
+  objectType: "egg" # can be block, egg or pen
+  observationType: "full_state" #
+  handAgentIndex: "[[0, 1, 2, 3, 4, 5]]"
+  asymmetric_observations: True
+  successTolerance: 0.1
+  printNumSuccesses: False
+  maxConsecutiveSuccesses: 0
+  hitDistThreshold: 0.25
+  catchDistThreshold: 0.20
+  hitContactForceThreshold: 0.05
+  catchContactForceThreshold: 0.05
+  catchSpeedThreshold: 1.5
+  catchHoldSteps: 3
+  objectHeightThreshold: 0.15
+
+  asset:
+    assetRoot: "../assets"
+    assetFileName: "mjcf/open_ai_assets/hand/shadow_hand.xml"
+    assetFileNameBlock: "urdf/objects/cube_multicolor.urdf"
+    assetFileNameEgg: "mjcf/open_ai_assets/hand/egg.xml"
+    assetFileNamePen: "mjcf/open_ai_assets/hand/pen.xml"
+
+task:
+  randomize: False
+  randomization_params:
+    frequency: 600
+
+sim:
+  dt: 0.016666666666666666
+  substeps: 2
+  physx:
+    num_threads: 16
+    solver_type: 1
+    num_position_iterations: 8
+    num_velocity_iterations: 0
+    contact_offset: 0.002
+    rest_offset: 0.0
+    bounce_threshold_velocity: 0.2
+    max_depenetration_velocity: 1000.0
+    default_buffer_size_multiplier: 30.0
+    contact_collection: 1
+  flex:
+    num_outer_iterations: 5
+    num_inner_iterations: 20
+    warm_start: 0.8
+    relaxation: 0.75
