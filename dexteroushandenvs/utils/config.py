@@ -338,6 +338,12 @@ def get_args(benchmark=False, use_rlg_config=False):
             "help": "Freeze policy updates while collecting rollouts, useful for estimator-only training",
         },
         {
+            "name": "--deterministic_rollout",
+            "action": "store_true",
+            "default": False,
+            "help": "Use deterministic policy actions during rollout, useful for checkpoint evaluation",
+        },
+        {
             "name": "--use_traj_estimator",
             "action": "store_true",
             "default": False,

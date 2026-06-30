@@ -76,6 +76,7 @@ class Runner:
         self.eval_episodes = config["eval_episodes"]
         self.log_interval = config["log_interval"]
         self.freeze_policy = config.get("freeze_policy", False)
+        self.deterministic_rollout = config.get("deterministic_rollout", False)
 
         self.seed = self.envs.task.cfg["seed"]
         self.model_dir = model_dir
@@ -96,6 +97,12 @@ class Runner:
         self.save_dir = str(self.run_dir + '/' + self.env_name + '/' + self.algorithm_name + '/models_seed{}'.format(self.seed))
         if not os.path.exists(self.save_dir):
             os.makedirs(self.save_dir)
+        self.best_metrics = {
+            "episode_reward": -float("inf"),
+            "goal_success_rate": -float("inf"),
+            "hit_rate": -float("inf"),
+            "catch_success_rate": -float("inf"),
+        }
 
         if self.algorithm_name == "happo":
             from algorithms.marl.happo_trainer import HAPPO as TrainAlgo
@@ -227,21 +234,25 @@ class Runner:
                                             total_num_steps)
                 self.writter.add_scalar("train_episode_fps", int(total_num_steps / (end - start)),
                                             total_num_steps)
+                self._maybe_save_best("episode_reward", aver_episode_rewards, episode, total_num_steps)
 
             if len(done_episode_successes) != 0:
                 aver_success_rate = torch.stack(done_episode_successes).float().mean().cpu().numpy().tolist()
                 print("some episodes done, average goal success rate: ", aver_success_rate)
                 self.writter.add_scalar("train_episode_success_rate", aver_success_rate, total_num_steps)
+                self._maybe_save_best("goal_success_rate", aver_success_rate, episode, total_num_steps)
 
             if len(done_episode_hit_successes) != 0:
                 aver_hit_rate = torch.stack(done_episode_hit_successes).float().mean().cpu().numpy().tolist()
                 print("some episodes done, average hit rate: ", aver_hit_rate)
                 self.writter.add_scalar("train_episode_hr", aver_hit_rate, total_num_steps)
+                self._maybe_save_best("hit_rate", aver_hit_rate, episode, total_num_steps)
 
             if len(done_episode_catch_successes) != 0:
                 aver_catch_success_rate = torch.stack(done_episode_catch_successes).float().mean().cpu().numpy().tolist()
                 print("some episodes done, average catch success rate: ", aver_catch_success_rate)
                 self.writter.add_scalar("train_episode_sr", aver_catch_success_rate, total_num_steps)
+                self._maybe_save_best("catch_success_rate", aver_catch_success_rate, episode, total_num_steps)
 
             if isinstance(infos, dict) and "mean_goal_dist" in infos:
                 self.writter.add_scalar("train_mean_goal_dist", infos["mean_goal_dist"].mean().item(), total_num_steps)
@@ -310,7 +321,8 @@ class Runner:
                                                             self.buffer[agent_id].obs[step],
                                                             self.buffer[agent_id].rnn_states[step],
                                                             self.buffer[agent_id].rnn_states_critic[step],
-                                                            self.buffer[agent_id].masks[step])
+                                                            self.buffer[agent_id].masks[step],
+                                                            deterministic=self.deterministic_rollout)
             value_collector.append(value.detach())
             action_collector.append(action.detach())
             action_log_prob_collector.append(action_log_prob.detach())
@@ -409,18 +421,43 @@ class Runner:
 
         return train_infos
 
-    def save(self, episode):
+    def _maybe_save_best(self, metric_name, metric_value, episode, total_num_steps):
+        if self.freeze_policy:
+            return
+
+        metric_value = float(metric_value)
+        if metric_value <= self.best_metrics[metric_name] + 1.0e-8:
+            return
+
+        self.best_metrics[metric_name] = metric_value
+        save_name = "best_{}".format(metric_name)
+        self.save(episode, save_name=save_name)
+
+        info_path = os.path.join(str(self.save_dir), save_name, "best_info.txt")
+        with open(info_path, "w") as f:
+            f.write("metric: {}\n".format(metric_name))
+            f.write("value: {:.10f}\n".format(metric_value))
+            f.write("episode_update: {}\n".format(episode))
+            f.write("total_num_steps: {}\n".format(total_num_steps))
+
+        self.writter.add_scalar("best/{}".format(metric_name), metric_value, total_num_steps)
+        print("New best {}: {:.6f} at update {}, saved to {}".format(
+            metric_name, metric_value, episode, os.path.join(str(self.save_dir), save_name)
+        ))
+
+    def save(self, episode, save_name=None):
+        checkpoint_dir = os.path.join(str(self.save_dir), save_name if save_name is not None else str(episode))
         for agent_id in range(self.num_agents):
             if self.use_single_network:
                 policy_model = self.trainer[agent_id].policy.model
-                os.makedirs(str(self.save_dir) + "/{}".format(episode), exist_ok=True)
-                torch.save(policy_model.state_dict(), str(self.save_dir) + "/{}/model_agent".format(episode) + str(agent_id) + ".pt")
+                os.makedirs(checkpoint_dir, exist_ok=True)
+                torch.save(policy_model.state_dict(), os.path.join(checkpoint_dir, "model_agent" + str(agent_id) + ".pt"))
             else:
-                os.makedirs(str(self.save_dir) + "/{}".format(episode), exist_ok=True)
+                os.makedirs(checkpoint_dir, exist_ok=True)
                 policy_actor = self.trainer[agent_id].policy.actor
-                torch.save(policy_actor.state_dict(), str(self.save_dir) + "/{}/actor_agent".format(episode) + str(agent_id) + ".pt")
+                torch.save(policy_actor.state_dict(), os.path.join(checkpoint_dir, "actor_agent" + str(agent_id) + ".pt"))
                 policy_critic = self.trainer[agent_id].policy.critic
-                torch.save(policy_critic.state_dict(), str(self.save_dir) + "/{}/critic_agent".format(episode) + str(agent_id) + ".pt")
+                torch.save(policy_critic.state_dict(), os.path.join(checkpoint_dir, "critic_agent" + str(agent_id) + ".pt"))
 
     def restore(self):
         for agent_id in range(self.num_agents):
