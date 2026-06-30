@@ -203,6 +203,8 @@ class Runner:
             # compute return and update network
             if self.freeze_policy:
                 train_infos = [{} for _ in range(self.num_agents)]
+                for agent_id in range(self.num_agents):
+                    self.buffer[agent_id].after_update()
             else:
                 self.compute()
                 train_infos = self.train()
