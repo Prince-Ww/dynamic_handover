@@ -1303,11 +1303,11 @@ def compute_hand_reward(
 
     reward = torch.exp(-dist_reward_scale * dist_rew) + object_vel_reward + action_penalty_scale * action_penalty
 
-    # Find out which envs hit the goal and update successes count
-    goal_resets = torch.where(torch.abs(goal_dist) <= 0, torch.ones_like(reset_goal_buf), reset_goal_buf)
+    # Find out which envs reach the preset target position and update successes count
+    goal_resets = torch.where(goal_dist <= success_tolerance, torch.ones_like(reset_goal_buf), reset_goal_buf)
     successes = successes + goal_resets
 
-    # Success bonus: orientation is within `success_tolerance` of goal orientation
+    # Success bonus: object position is within `success_tolerance` of target position
     reward = torch.where(goal_resets == 1, reward + reach_goal_bonus, reward)
 
     # Fall penalty: distance to the goal is larger than a threashold
