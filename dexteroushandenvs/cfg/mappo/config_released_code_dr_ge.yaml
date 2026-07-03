@@ -4,8 +4,8 @@ experiment_name: released_code_dr_ge
 run_dir: ./logs_released_code_dr_ge
 use_centralized_V: True
 use_obs_instead_of_state: False
-# Released-code default is 100M. Change this only if you want a longer run.
-num_env_steps: 100000000
+# Released-code default is 100M; this experiment runs 200M environment steps.
+num_env_steps: 200000000
 episode_length: 8
 n_rollout_threads: 80
 n_eval_rollout_threads: 1
