@@ -38,6 +38,9 @@ def apply_training_mode(args, cfg, cfg_train):
     cfg["freeze_estimator"] = args.freeze_estimator
     cfg["traj_estimator_model"] = args.traj_estimator_model
     cfg["traj_estimator_save_dir"] = args.traj_estimator_save_dir
+    cfg["init_traj_estimator_from_model"] = (
+        args.train_estimator and args.use_traj_estimator and not args.joint_train_estimator_policy
+    )
     cfg_train["freeze_policy"] = args.freeze_policy
     cfg_train["deterministic_rollout"] = args.deterministic_rollout
 

@@ -710,6 +710,7 @@ class AllegroHandDynamicHandover(BaseTask):
         self.train_estimator = self.cfg.get("train_estimator", False)
         self.use_traj_estimator = self.cfg.get("use_traj_estimator", False)
         self.freeze_estimator = self.cfg.get("freeze_estimator", False)
+        self.init_traj_estimator_from_model = self.cfg.get("init_traj_estimator_from_model", False)
         self.traj_estimator_model_path = self.cfg.get("traj_estimator_model", "./traj_e/model.pt")
         if self.train_estimator and self.freeze_estimator:
             raise ValueError("--train_estimator and --freeze_estimator cannot be used together")
@@ -723,12 +724,18 @@ class AllegroHandDynamicHandover(BaseTask):
         os.makedirs(self.traj_estimator_save_path, exist_ok=True)
         self.bce_logits_loss = torch.nn.BCEWithLogitsLoss()
 
-        if (self.use_traj_estimator and not self.train_estimator) or self.is_test:
+        should_load_traj_estimator = (
+            self.init_traj_estimator_from_model
+            or (self.use_traj_estimator and not self.train_estimator)
+            or self.is_test
+        )
+        if should_load_traj_estimator:
             if not os.path.exists(self.traj_estimator_model_path):
                 raise FileNotFoundError(
                     "Trajectory estimator checkpoint not found: {}".format(self.traj_estimator_model_path)
                 )
             self.traj_estimator.load_state_dict(torch.load(self.traj_estimator_model_path, map_location=self.device))
+            print("Loaded trajectory estimator checkpoint: {}".format(self.traj_estimator_model_path))
 
         if self.train_estimator:
             self.traj_estimator.train()
