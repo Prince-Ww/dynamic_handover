@@ -173,11 +173,11 @@ class AllegroHandDynamicHandover(BaseTask):
         if isinstance(configured_objects, str):
             configured_objects = [name.strip() for name in configured_objects.split(",") if name.strip()]
         self.used_training_objects = list(configured_objects)
-        unknown_objects = [name for name in self.used_training_objects if name not in self.object_asset_files]
+        unknown_objects = [name for name in self.used_training_objects if name not in self.asset_files_dict]
         if unknown_objects:
             raise ValueError(
                 "Unknown usedTrainingObjects {}. Available objects: {}".format(
-                    unknown_objects, sorted(self.object_asset_files.keys())
+                    unknown_objects, sorted(self.asset_files_dict.keys())
                 )
             )
         print("Used objects:", self.used_training_objects)
