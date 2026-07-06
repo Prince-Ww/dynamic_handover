@@ -90,6 +90,12 @@ class Runner:
         torch.backends.cudnn.benchmark = True
 
         self.run_dir = config["run_dir"]
+        if config.get("prevent_log_overwrite", False):
+            if os.path.isdir(self.run_dir) and os.listdir(self.run_dir):
+                raise RuntimeError(
+                    "Refusing to write into non-empty run_dir '{}'. "
+                    "Use a new run_dir or disable prevent_log_overwrite.".format(self.run_dir)
+                )
         self.log_dir = str(self.run_dir + '/' + self.env_name + '/' + self.algorithm_name +'/logs_seed{}'.format(self.seed))
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir)
@@ -200,6 +206,23 @@ class Runner:
                 # insert data into buffer
                 self.insert(data)
 
+            # Metrics are produced by the current rollout, so best checkpoints
+            # must be saved before PPO updates the policy with that rollout.
+            total_num_steps = (episode + 1) * self.episode_length * self.n_rollout_threads
+            rollout_metrics = {}
+            if len(done_episodes_rewards) != 0:
+                rollout_metrics["episode_reward"] = torch.stack(done_episodes_rewards).mean().cpu().numpy().tolist()
+            if len(done_episode_successes) != 0:
+                rollout_metrics["goal_success_rate"] = torch.stack(done_episode_successes).float().mean().cpu().numpy().tolist()
+            if len(done_episode_hit_successes) != 0:
+                rollout_metrics["hit_rate"] = torch.stack(done_episode_hit_successes).float().mean().cpu().numpy().tolist()
+            if len(done_episode_catch_successes) != 0:
+                rollout_metrics["catch_success_rate"] = torch.stack(done_episode_catch_successes).float().mean().cpu().numpy().tolist()
+
+            if not self.freeze_policy:
+                for metric_name, metric_value in rollout_metrics.items():
+                    self._maybe_save_best(metric_name, metric_value, episode, total_num_steps)
+
             # compute return and update network
             if self.freeze_policy:
                 train_infos = [{} for _ in range(self.num_agents)]
@@ -210,14 +233,13 @@ class Runner:
                 train_infos = self.train()
 
             # post process
-            total_num_steps = (episode + 1) * self.episode_length * self.n_rollout_threads
             # save model
             if not self.freeze_policy and (episode % self.save_interval == 0 or episode == episodes - 1):
                 self.save(episode)
 
             # log information
+            end = time.time()
             if episode % self.log_interval == 0:
-                end = time.time()
                 print("\nAlgo {} Exp {} updates {}/{} episodes, total num timesteps {}/{}, FPS {}.\n"
                       .format(self.algorithm_name,
                               self.experiment_name,
@@ -229,32 +251,28 @@ class Runner:
 
                 self.log_train(train_infos, total_num_steps)
 
-            if len(done_episodes_rewards) != 0:
-                aver_episode_rewards = torch.stack(done_episodes_rewards).mean().cpu().numpy().tolist()
+            if "episode_reward" in rollout_metrics:
+                aver_episode_rewards = rollout_metrics["episode_reward"]
                 print("some episodes done, average rewards: ", aver_episode_rewards)
                 self.writter.add_scalar("train_episode_rewards", aver_episode_rewards,
                                             total_num_steps)
                 self.writter.add_scalar("train_episode_fps", int(total_num_steps / (end - start)),
                                             total_num_steps)
-                self._maybe_save_best("episode_reward", aver_episode_rewards, episode, total_num_steps)
 
-            if len(done_episode_successes) != 0:
-                aver_success_rate = torch.stack(done_episode_successes).float().mean().cpu().numpy().tolist()
+            if "goal_success_rate" in rollout_metrics:
+                aver_success_rate = rollout_metrics["goal_success_rate"]
                 print("some episodes done, average goal success rate: ", aver_success_rate)
                 self.writter.add_scalar("train_episode_success_rate", aver_success_rate, total_num_steps)
-                self._maybe_save_best("goal_success_rate", aver_success_rate, episode, total_num_steps)
 
-            if len(done_episode_hit_successes) != 0:
-                aver_hit_rate = torch.stack(done_episode_hit_successes).float().mean().cpu().numpy().tolist()
+            if "hit_rate" in rollout_metrics:
+                aver_hit_rate = rollout_metrics["hit_rate"]
                 print("some episodes done, average hit rate: ", aver_hit_rate)
                 self.writter.add_scalar("train_episode_hr", aver_hit_rate, total_num_steps)
-                self._maybe_save_best("hit_rate", aver_hit_rate, episode, total_num_steps)
 
-            if len(done_episode_catch_successes) != 0:
-                aver_catch_success_rate = torch.stack(done_episode_catch_successes).float().mean().cpu().numpy().tolist()
+            if "catch_success_rate" in rollout_metrics:
+                aver_catch_success_rate = rollout_metrics["catch_success_rate"]
                 print("some episodes done, average catch success rate: ", aver_catch_success_rate)
                 self.writter.add_scalar("train_episode_sr", aver_catch_success_rate, total_num_steps)
-                self._maybe_save_best("catch_success_rate", aver_catch_success_rate, episode, total_num_steps)
 
             if isinstance(infos, dict) and "mean_goal_dist" in infos:
                 self.writter.add_scalar("train_mean_goal_dist", infos["mean_goal_dist"].mean().item(), total_num_steps)
