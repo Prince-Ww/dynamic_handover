@@ -42,7 +42,6 @@ env:
   maxConsecutiveSuccesses: 0
   # HR/SR diagnostic thresholds. These do not affect the reward; they only affect
   # train_episode_hr, train_episode_sr, and debug_hrsr_* TensorBoard metrics.
-  useContactForHRSR: False
   hitDistThreshold: 0.25
   catchDistThreshold: 0.20
   hitContactForceThreshold: 0.05
