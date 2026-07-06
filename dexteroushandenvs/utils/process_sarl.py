@@ -1,6 +1,9 @@
 
 
 
+import os
+
+
 def process_ppo(args, env, cfg_train, logdir):
     from algorithms.sarl.ppo import PPO, ActorCritic, ActorCriticPointCloud
     learn_cfg = cfg_train["learn"]
@@ -12,6 +15,11 @@ def process_ppo(args, env, cfg_train, logdir):
         chkpt_path = args.model_dir
 
     logdir = logdir + "_seed{}".format(env.task.cfg["seed"])
+    if cfg_train.get("prevent_log_overwrite", False) and os.path.isdir(logdir) and os.listdir(logdir):
+        raise RuntimeError(
+            "Refusing to reuse non-empty PPO logdir '{}'. "
+            "Please change --experiment or remove/archive that directory.".format(logdir)
+        )
 
     if env.task.cfg["env"]["observationType"] in ["point_cloud", "point_cloud_for_distill"]:
         actor_critic = ActorCriticPointCloud

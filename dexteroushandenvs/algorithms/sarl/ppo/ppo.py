@@ -123,6 +123,9 @@ class PPO:
         else:
             rewbuffer = deque(maxlen=100)
             lenbuffer = deque(maxlen=100)
+            goal_success_buffer = deque(maxlen=100)
+            hit_success_buffer = deque(maxlen=100)
+            catch_success_buffer = deque(maxlen=100)
             cur_reward_sum = torch.zeros(self.vec_env.num_envs, dtype=torch.float, device=self.device)
             cur_episode_length = torch.zeros(self.vec_env.num_envs, dtype=torch.float, device=self.device)
 
@@ -132,6 +135,9 @@ class PPO:
             for it in range(self.current_learning_iteration, num_learning_iterations):
                 start = time.time()
                 ep_infos = []
+                done_episode_successes = []
+                done_episode_hit_successes = []
+                done_episode_catch_successes = []
 
                 # Rollout
                 for _ in range(self.num_transitions_per_env):
@@ -157,6 +163,20 @@ class PPO:
                         new_ids = (dones > 0).nonzero(as_tuple=False)
                         reward_sum.extend(cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
                         episode_length.extend(cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
+                        done_ids = new_ids.flatten()
+                        if done_ids.numel() > 0 and isinstance(infos, dict):
+                            if "episode_success" in infos:
+                                done_episode_successes.extend(
+                                    infos["episode_success"].to(self.device).flatten()[done_ids].cpu().numpy().tolist()
+                                )
+                            if "episode_hit_success" in infos:
+                                done_episode_hit_successes.extend(
+                                    infos["episode_hit_success"].to(self.device).flatten()[done_ids].cpu().numpy().tolist()
+                                )
+                            if "episode_catch_success" in infos:
+                                done_episode_catch_successes.extend(
+                                    infos["episode_catch_success"].to(self.device).flatten()[done_ids].cpu().numpy().tolist()
+                                )
                         cur_reward_sum[new_ids] = 0
                         cur_episode_length[new_ids] = 0
 
@@ -165,6 +185,11 @@ class PPO:
                     # episode_length = [x[0] for x in episode_length]
                     rewbuffer.extend(reward_sum)
                     lenbuffer.extend(episode_length)
+                    goal_success_buffer.extend(done_episode_successes)
+                    hit_success_buffer.extend(done_episode_hit_successes)
+                    catch_success_buffer.extend(done_episode_catch_successes)
+                    reward_sum.clear()
+                    episode_length.clear()
 
                 _, _, last_values, _, _ = self.actor_critic.act(current_obs, current_states)
                 stop = time.time()
@@ -210,10 +235,17 @@ class PPO:
         self.writer.add_scalar('Policy/mean_noise_std', mean_std.item(), locs['it'])
         if len(locs['rewbuffer']) > 0:
             self.writer.add_scalar('Train/mean_reward', statistics.mean(locs['rewbuffer']), locs['it'])
+            self.writer.add_scalar('train_episode_rewards', statistics.mean(locs['rewbuffer']), self.tot_timesteps)
             self.writer.add_scalar('Train/FPS',fps,locs['it'])
             self.writer.add_scalar('Train/mean_episode_length', statistics.mean(locs['lenbuffer']), locs['it'])
             self.writer.add_scalar('Train/mean_reward/time', statistics.mean(locs['rewbuffer']), self.tot_time)
             self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
+        if len(locs['goal_success_buffer']) > 0:
+            self.writer.add_scalar('train_episode_success_rate', statistics.mean(locs['goal_success_buffer']), self.tot_timesteps)
+        if len(locs['hit_success_buffer']) > 0:
+            self.writer.add_scalar('train_episode_hr', statistics.mean(locs['hit_success_buffer']), self.tot_timesteps)
+        if len(locs['catch_success_buffer']) > 0:
+            self.writer.add_scalar('train_episode_sr', statistics.mean(locs['catch_success_buffer']), self.tot_timesteps)
 
         self.writer.add_scalar('Train2/mean_reward/step', locs['mean_reward'], locs['it'])
         self.writer.add_scalar('Train2/mean_episode_length/episode', locs['mean_trajectory_length'], locs['it'])
@@ -232,6 +264,9 @@ class PPO:
                           f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
                           f"""{'Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
                           f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n"""
+                          f"""{'Mean goal success rate:':>{pad}} {statistics.mean(locs['goal_success_buffer']) if len(locs['goal_success_buffer']) > 0 else 0.0:.4f}\n"""
+                          f"""{'Mean hit rate:':>{pad}} {statistics.mean(locs['hit_success_buffer']) if len(locs['hit_success_buffer']) > 0 else 0.0:.4f}\n"""
+                          f"""{'Mean catch success rate:':>{pad}} {statistics.mean(locs['catch_success_buffer']) if len(locs['catch_success_buffer']) > 0 else 0.0:.4f}\n"""
                           f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
                           f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
         else:
