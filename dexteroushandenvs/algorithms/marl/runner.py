@@ -493,21 +493,24 @@ class Runner:
 
     @torch.no_grad()
     def eval(self, total_num_steps):
+        eval_threads = self.eval_envs.num_envs
         eval_episode = 0
         eval_episode_rewards = []
+        eval_episode_successes = []
+        eval_episode_hit_successes = []
+        eval_episode_catch_successes = []
         one_episode_rewards = []
-        for eval_i in range(self.n_eval_rollout_threads):
+        for eval_i in range(eval_threads):
             one_episode_rewards.append([])
 
         eval_obs, eval_share_obs, _ = self.eval_envs.reset()
 
-        eval_rnn_states = torch.zeros(self.n_eval_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size,
+        eval_rnn_states = torch.zeros(eval_threads, self.num_agents, self.recurrent_N, self.hidden_size,
                                    device=self.device)
-        eval_masks = torch.ones(self.n_eval_rollout_threads, self.num_agents, 1, device=self.device)
+        eval_masks = torch.ones(eval_threads, self.num_agents, 1, device=self.device)
 
         while True:
             eval_actions_collector = []
-            eval_rnn_states_collector = []
             for agent_id in range(self.num_agents):
                 self.trainer[agent_id].prep_rollout()
                 eval_actions, temp_rnn_state = \
@@ -524,7 +527,18 @@ class Runner:
             eval_obs, eval_share_obs, eval_rewards, eval_dones, eval_infos, _ = self.eval_envs.step(
                 eval_actions)
 
-            for eval_i in range(self.n_eval_rollout_threads):
+            episode_success = None
+            episode_hit_success = None
+            episode_catch_success = None
+            if isinstance(eval_infos, dict):
+                if "episode_success" in eval_infos:
+                    episode_success = eval_infos["episode_success"].to(self.device).flatten()
+                if "episode_hit_success" in eval_infos:
+                    episode_hit_success = eval_infos["episode_hit_success"].to(self.device).flatten()
+                if "episode_catch_success" in eval_infos:
+                    episode_catch_success = eval_infos["episode_catch_success"].to(self.device).flatten()
+
+            for eval_i in range(eval_threads):
                 one_episode_rewards[eval_i].append(eval_rewards[eval_i])
 
             eval_dones_env = torch.all(eval_dones, dim=1)
@@ -532,23 +546,42 @@ class Runner:
             eval_rnn_states[eval_dones_env == True] = torch.zeros(
                 (eval_dones_env == True).sum(), self.num_agents, self.recurrent_N, self.hidden_size, device=self.device)
 
-            eval_masks = torch.ones(self.n_eval_rollout_threads, self.num_agents, 1, device=self.device)
+            eval_masks = torch.ones(eval_threads, self.num_agents, 1, device=self.device)
             eval_masks[eval_dones_env == True] = torch.zeros((eval_dones_env == True).sum(), self.num_agents, 1,
                                                           device=self.device)
 
-            for eval_i in range(self.n_eval_rollout_threads):
+            for eval_i in range(eval_threads):
                 if eval_dones_env[eval_i]:
                     eval_episode += 1
                     eval_episode_rewards.append(torch.sum(torch.cat(one_episode_rewards[eval_i]), dim=0))
+                    if episode_success is not None:
+                        eval_episode_successes.append(episode_success[eval_i].clone())
+                    if episode_hit_success is not None:
+                        eval_episode_hit_successes.append(episode_hit_success[eval_i].clone())
+                    if episode_catch_success is not None:
+                        eval_episode_catch_successes.append(episode_catch_success[eval_i].clone())
                     one_episode_rewards[eval_i] = []
 
             if eval_episode >= self.eval_episodes:
                 eval_episode_rewards = torch.cat(eval_episode_rewards,dim=-1)
                 eval_env_infos = {'eval_average_episode_rewards': torch.mean(eval_episode_rewards),
                                   'eval_max_episode_rewards': torch.max(eval_episode_rewards)}
+                if len(eval_episode_successes) != 0:
+                    eval_env_infos["eval_goal_success_rate"] = torch.stack(eval_episode_successes).float().mean()
+                if len(eval_episode_hit_successes) != 0:
+                    eval_env_infos["eval_hit_rate"] = torch.stack(eval_episode_hit_successes).float().mean()
+                if len(eval_episode_catch_successes) != 0:
+                    eval_env_infos["eval_catch_success_rate"] = torch.stack(eval_episode_catch_successes).float().mean()
+
                 print(eval_env_infos)
                 self.log_env(eval_env_infos, total_num_steps)
                 print("eval_average_episode_rewards is {}.".format(torch.mean(eval_episode_rewards)))
+                if "eval_goal_success_rate" in eval_env_infos:
+                    print("eval_goal_success_rate is {}.".format(eval_env_infos["eval_goal_success_rate"]))
+                if "eval_hit_rate" in eval_env_infos:
+                    print("eval_hit_rate is {}.".format(eval_env_infos["eval_hit_rate"]))
+                if "eval_catch_success_rate" in eval_env_infos:
+                    print("eval_catch_success_rate is {}.".format(eval_env_infos["eval_catch_success_rate"]))
                 break
 
     @torch.no_grad()

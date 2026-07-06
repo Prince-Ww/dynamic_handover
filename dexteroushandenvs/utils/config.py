@@ -206,6 +206,18 @@ def parse_sim_params(args, cfg, cfg_train):
     # if sim options are provided in cfg, parse them and update/override above:
     if "sim" in cfg:
         gymutil.parse_sim_config(cfg["sim"], sim_params)
+        physx_cfg = cfg["sim"].get("physx", {})
+        for key in (
+            "gpu_found_lost_pairs_capacity",
+            "gpu_found_lost_aggregate_pairs_capacity",
+            "gpu_total_aggregate_pairs_capacity",
+        ):
+            if key in physx_cfg:
+                if hasattr(sim_params.physx, key):
+                    setattr(sim_params.physx, key, int(physx_cfg[key]))
+                    print(f"Set sim_params.physx.{key} = {getattr(sim_params.physx, key)}")
+                else:
+                    print(f"WARNING: sim_params.physx has no attribute '{key}', config value is ignored.")
 
     # Override num_threads if passed on the command line
     if args.physics_engine == gymapi.SIM_PHYSX and args.num_threads > 0:
