@@ -94,6 +94,11 @@ def load_cfg(args, use_rlg_config=False):
     if args.episode_length > 0:
         cfg["env"]["episodeLength"] = args.episode_length
 
+    if getattr(args, "used_objects", ""):
+        cfg["env"]["usedTrainingObjects"] = [
+            name.strip() for name in args.used_objects.split(",") if name.strip()
+        ]
+
     cfg["name"] = args.task
     cfg["headless"] = args.headless
 
@@ -337,6 +342,12 @@ def get_args(benchmark=False, use_rlg_config=False):
         },
         {"name": "--algo", "type": str, "default": "maddpg", "help": "Choose an algorithm"},
         {"name": "--model_dir", "type": str, "default": "", "help": "Choose a model dir"},
+        {
+            "name": "--used_objects",
+            "type": str,
+            "default": "",
+            "help": "Comma-separated object names to use, for example: ball or ball,block,pen",
+        },
         {
             "name": "--train_estimator",
             "action": "store_true",

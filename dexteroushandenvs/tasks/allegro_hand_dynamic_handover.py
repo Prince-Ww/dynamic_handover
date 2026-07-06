@@ -168,7 +168,19 @@ class AllegroHandDynamicHandover(BaseTask):
         }
 
 
-        self.used_training_objects = ["ball", "block", "pen"]
+        default_training_objects = ["ball", "block", "pen"]
+        configured_objects = self.cfg["env"].get("usedTrainingObjects", default_training_objects)
+        if isinstance(configured_objects, str):
+            configured_objects = [name.strip() for name in configured_objects.split(",") if name.strip()]
+        self.used_training_objects = list(configured_objects)
+        unknown_objects = [name for name in self.used_training_objects if name not in self.object_asset_files]
+        if unknown_objects:
+            raise ValueError(
+                "Unknown usedTrainingObjects {}. Available objects: {}".format(
+                    unknown_objects, sorted(self.object_asset_files.keys())
+                )
+            )
+        print("Used objects:", self.used_training_objects)
 
         # self.used_training_objects = ["ball", "obj0", "obj1", "obj2", "obj4", "obj6", "obj7", "obj9", "obj10",
         #                               "novel_obj1", "novel_obj2", "novel_obj3", "novel_obj4", "novel_obj5", "novel_obj6",
