@@ -764,6 +764,7 @@ class AllegroHandDynamicHandover(BaseTask):
         self.catch_speed_threshold = self.cfg["env"].get("catchSpeedThreshold", 1.5)
         self.catch_hold_steps = self.cfg["env"].get("catchHoldSteps", 3)
         self.object_height_threshold = self.cfg["env"].get("objectHeightThreshold", 0.15)
+        self.use_contact_for_hrsr = self.cfg["env"].get("useContactForHRSR", True)
         self.episode_hit_success_buf = torch.zeros_like(self.rew_buf)
         self.episode_catch_success_buf = torch.zeros_like(self.rew_buf)
         self.catch_hold_buf = torch.zeros_like(self.rew_buf)
@@ -840,14 +841,20 @@ class AllegroHandDynamicHandover(BaseTask):
             finger_contact_force >= self.catch_contact_force_threshold,
             palm_contact_force >= self.catch_contact_force_threshold,
         )
+        if self.use_contact_for_hrsr:
+            hit_contact_gate = hit_contact_ok
+            catch_contact_gate = catch_contact_ok
+        else:
+            hit_contact_gate = torch.ones_like(hit_dist_ok)
+            catch_contact_gate = torch.ones_like(catch_dist_ok)
         catch_speed_ok = object_relative_speed <= self.catch_speed_threshold
 
-        hit_now = torch.logical_and(hit_dist_ok, hit_contact_ok)
+        hit_now = torch.logical_and(hit_dist_ok, hit_contact_gate)
 
         catch_condition = torch.logical_and(
             catch_dist_ok,
             torch.logical_and(
-                catch_contact_ok,
+                catch_contact_gate,
                 torch.logical_and(catch_speed_ok, object_above_ground),
             ),
         )
@@ -882,6 +889,9 @@ class AllegroHandDynamicHandover(BaseTask):
         self.extras['debug_hrsr_max_finger_contact_force'] = finger_contact_force.max().unsqueeze(0)
         self.extras['debug_hrsr_max_all_contact_force'] = all_contact_force.max().unsqueeze(0)
         self.extras['debug_hrsr_min_object_palm_relative_speed'] = object_relative_speed.min().unsqueeze(0)
+        self.extras['debug_hrsr_contact_gate_enabled'] = torch.tensor(
+            float(self.use_contact_for_hrsr), device=self.device
+        ).unsqueeze(0)
 
         reset_mask = self.reset_buf > 0
         self.episode_hit_success_buf = torch.where(
