@@ -1,10 +1,14 @@
 import os
 
+from isaacgym import gymapi
+
+# Some cloud images leave this empty/invalid, which makes libgomp noisy.
+if not os.environ.get("OMP_NUM_THREADS", "").isdigit():
+    os.environ["OMP_NUM_THREADS"] = "1"
+
 import cv2
 import numpy as np
 import torch
-
-from isaacgym import gymapi
 
 from train import apply_training_mode
 from utils.config import get_args, load_cfg, parse_sim_params, set_np_formatting, set_seed
