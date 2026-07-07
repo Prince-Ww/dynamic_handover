@@ -252,7 +252,7 @@ class AllegroHandDynamicHandover(BaseTask):
         else :
             self.pointCloudVisualizer = None
 
-        super().__init__(cfg=self.cfg)
+        super().__init__(cfg=self.cfg, enable_camera_sensors=self.enable_camera_sensors)
 
         if self.viewer != None:
             cam_pos = gymapi.Vec3(0.9, -0.65, 1.0)
