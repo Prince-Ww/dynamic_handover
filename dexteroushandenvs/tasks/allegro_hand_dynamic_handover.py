@@ -234,14 +234,9 @@ class AllegroHandDynamicHandover(BaseTask):
         self.cfg["device_id"] = device_id
         self.cfg["headless"] = headless
 
-        self.enable_camera_sensors = self.cfg["env"]["enableCameraSensors"]
         self.camera_debug = self.cfg["env"].get("cameraDebug", False)
         self.point_cloud_debug = self.cfg["env"].get("pointCloudDebug", False)
         self.num_envs = cfg["env"]["numEnvs"]
-        self.camera_props = gymapi.CameraProperties()
-        self.camera_props.width = int(self.cfg["env"].get("cameraWidth", 640))
-        self.camera_props.height = int(self.cfg["env"].get("cameraHeight", 480))
-        self.camera_props.enable_tensors = True
 
         if self.point_cloud_debug:
             import open3d as o3d
@@ -252,7 +247,7 @@ class AllegroHandDynamicHandover(BaseTask):
         else :
             self.pointCloudVisualizer = None
 
-        super().__init__(cfg=self.cfg, enable_camera_sensors=self.enable_camera_sensors)
+        super().__init__(cfg=self.cfg)
 
         if self.viewer != None:
             cam_pos = gymapi.Vec3(0.9, -0.65, 1.0)
@@ -564,11 +559,6 @@ class AllegroHandDynamicHandover(BaseTask):
 
         self.allegro_hands = []
         self.envs = []
-        self.cameras = []
-        self.camera_tensors = []
-        self.camera_view_matrixs = []
-        self.camera_proj_matrixs = []
-        self.env_origin = torch.zeros((num_envs, 3), dtype=torch.float, device=self.device)
 
         self.object_init_state = []
         self.hand_start_states = []
@@ -653,14 +643,6 @@ class AllegroHandDynamicHandover(BaseTask):
             self.gym.set_rigid_body_color(env_ptr, predict_goal_handle, 0, gymapi.MESH_VISUAL, gymapi.Vec3(0.8, 0.4, 0.))
             # self.gym.set_actor_scale(env_ptr, predict_goal_handle, 0.01)
 
-            if self.enable_camera_sensors:
-                camera_handle = self.gym.create_camera_sensor(env_ptr, self.camera_props)
-                self.gym.set_camera_location(camera_handle, env_ptr, gymapi.Vec3(0, -0.3, 0.43), gymapi.Vec3(0, -0.55, 0))
-                camera_tensor = self.gym.get_camera_image_gpu_tensor(self.sim, env_ptr, camera_handle, gymapi.IMAGE_DEPTH)
-                torch_cam_tensor = gymtorch.wrap_tensor(camera_tensor)
-                cam_vinv = torch.inverse((torch.tensor(self.gym.get_camera_view_matrix(self.sim, env_ptr, camera_handle)))).to(self.device)
-                cam_proj = torch.tensor(self.gym.get_camera_proj_matrix(self.sim, env_ptr, camera_handle), device=self.device)
-
             if self.object_type != "block":
                 self.gym.set_rigid_body_color(
                     env_ptr, object_handle, 0, gymapi.MESH_VISUAL, gymapi.Vec3(0.6, 0.72, 0.98))
@@ -672,16 +654,6 @@ class AllegroHandDynamicHandover(BaseTask):
 
             self.envs.append(env_ptr)
             self.allegro_hands.append(allegro_hand_actor)
-
-            if self.enable_camera_sensors:
-                origin = self.gym.get_env_origin(env_ptr)
-                self.env_origin[i][0] = origin.x
-                self.env_origin[i][1] = origin.y
-                self.env_origin[i][2] = origin.z
-                self.camera_tensors.append(torch_cam_tensor)
-                self.camera_view_matrixs.append(cam_vinv)
-                self.camera_proj_matrixs.append(cam_proj)
-                self.cameras.append(camera_handle)
 
         self.sensor_handle_indices = self._find_contact_body_indices(
             self.envs[0], first_another_hand_actor, self.contact_sensor_names, "critic/finger"
