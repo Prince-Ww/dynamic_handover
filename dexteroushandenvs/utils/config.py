@@ -435,6 +435,12 @@ def get_args(benchmark=False, use_rlg_config=False):
         {"name": "--video_env_id", "type": int, "default": 0},
         {"name": "--video_record_every", "type": int, "default": 1},
         {
+            "name": "--video_backend",
+            "type": str,
+            "default": "state",
+            "help": "Video backend: state draws a stable 2D state view; camera uses Isaac Gym camera sensors",
+        },
+        {
             "name": "--video_stochastic",
             "action": "store_true",
             "default": False,
