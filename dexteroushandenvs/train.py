@@ -36,6 +36,7 @@ def apply_training_mode(args, cfg, cfg_train):
     cfg["train_estimator"] = train_estimator
     cfg["use_traj_estimator"] = use_traj_estimator
     cfg["freeze_estimator"] = args.freeze_estimator
+    cfg["train_estimator_success_only"] = args.train_estimator_success_only
     cfg["traj_estimator_model"] = args.traj_estimator_model
     cfg["traj_estimator_save_dir"] = args.traj_estimator_save_dir
     cfg["init_traj_estimator_from_model"] = (

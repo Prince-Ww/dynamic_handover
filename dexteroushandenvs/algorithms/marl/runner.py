@@ -311,6 +311,18 @@ class Runner:
 
             if isinstance(infos, dict) and "pos_loss" in infos:
                 self.writter.add_scalar("train_traj_estimator_pos_loss", infos["pos_loss"].mean().item(), total_num_steps)
+            if isinstance(infos, dict) and "traj_estimator_success_sample_rate" in infos:
+                self.writter.add_scalar(
+                    "train_traj_estimator_success_sample_rate",
+                    infos["traj_estimator_success_sample_rate"].mean().item(),
+                    total_num_steps,
+                )
+            if isinstance(infos, dict) and "traj_estimator_success_sample_count" in infos:
+                self.writter.add_scalar(
+                    "train_traj_estimator_success_sample_count",
+                    infos["traj_estimator_success_sample_count"].mean().item(),
+                    total_num_steps,
+                )
 
             # eval
             if episode % self.eval_interval == 0 and self.use_eval:

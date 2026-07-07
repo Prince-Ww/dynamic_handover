@@ -355,6 +355,12 @@ def get_args(benchmark=False, use_rlg_config=False):
             "help": "Train the trajectory/goal estimator instead of loading it for evaluation",
         },
         {
+            "name": "--train_estimator_success_only",
+            "action": "store_true",
+            "default": False,
+            "help": "When training the trajectory/goal estimator, update it only on envs whose current episode reached the goal",
+        },
+        {
             "name": "--freeze_policy",
             "action": "store_true",
             "default": False,

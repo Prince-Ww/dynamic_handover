@@ -721,6 +721,7 @@ class AllegroHandDynamicHandover(BaseTask):
         self.train_estimator = self.cfg.get("train_estimator", False)
         self.use_traj_estimator = self.cfg.get("use_traj_estimator", False)
         self.freeze_estimator = self.cfg.get("freeze_estimator", False)
+        self.train_estimator_success_only = self.cfg.get("train_estimator_success_only", False)
         self.init_traj_estimator_from_model = self.cfg.get("init_traj_estimator_from_model", False)
         self.traj_estimator_model_path = self.cfg.get("traj_estimator_model", "./traj_e/model.pt")
         if self.train_estimator and self.freeze_estimator:
@@ -1009,7 +1010,23 @@ class AllegroHandDynamicHandover(BaseTask):
         return predict_pose, pose_latent_vector
 
     def update_contact_slamer(self, predict_pose):
-        self.pos_loss = F.mse_loss(predict_pose[:, 0:3], (self.goal_pos - self.allegro_right_hand_base_pos).clone())
+        target_pose = (self.goal_pos - self.allegro_right_hand_base_pos).clone()
+        if self.train_estimator_success_only:
+            estimator_mask = self.episode_success_buf > 0
+            accepted = estimator_mask.float().mean()
+            self.extras['traj_estimator_success_sample_rate'] = accepted.unsqueeze(0)
+            self.extras['traj_estimator_success_sample_count'] = estimator_mask.float().sum().unsqueeze(0)
+            if estimator_mask.any():
+                self.pos_loss = F.mse_loss(predict_pose[estimator_mask, 0:3], target_pose[estimator_mask])
+            else:
+                self.extras['pos_loss'] = torch.zeros(1, dtype=torch.float, device=self.device)
+                return
+        else:
+            self.extras['traj_estimator_success_sample_rate'] = torch.ones(1, dtype=torch.float, device=self.device)
+            self.extras['traj_estimator_success_sample_count'] = torch.tensor(
+                [float(self.num_envs)], dtype=torch.float, device=self.device
+            )
+            self.pos_loss = F.mse_loss(predict_pose[:, 0:3], target_pose)
         loss = self.pos_loss
         self.traj_estimator_optimizer.zero_grad()
         loss.backward()
