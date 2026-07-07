@@ -238,6 +238,10 @@ class AllegroHandDynamicHandover(BaseTask):
         self.camera_debug = self.cfg["env"].get("cameraDebug", False)
         self.point_cloud_debug = self.cfg["env"].get("pointCloudDebug", False)
         self.num_envs = cfg["env"]["numEnvs"]
+        self.camera_props = gymapi.CameraProperties()
+        self.camera_props.width = int(self.cfg["env"].get("cameraWidth", 640))
+        self.camera_props.height = int(self.cfg["env"].get("cameraHeight", 480))
+        self.camera_props.enable_tensors = True
 
         if self.point_cloud_debug:
             import open3d as o3d

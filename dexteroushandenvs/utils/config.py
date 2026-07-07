@@ -427,6 +427,19 @@ def get_args(benchmark=False, use_rlg_config=False):
             "default": "data/videos",
             "help": "Path for recording videos",
         },
+        {"name": "--video_path", "type": str, "default": "videos/policy_rollout.mp4"},
+        {"name": "--video_steps", "type": int, "default": 300},
+        {"name": "--video_fps", "type": int, "default": 20},
+        {"name": "--video_width", "type": int, "default": 640},
+        {"name": "--video_height", "type": int, "default": 480},
+        {"name": "--video_env_id", "type": int, "default": 0},
+        {"name": "--video_record_every", "type": int, "default": 1},
+        {
+            "name": "--video_stochastic",
+            "action": "store_true",
+            "default": False,
+            "help": "Record sampled policy actions instead of deterministic policy actions",
+        },
     ]
 
     if benchmark:
