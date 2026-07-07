@@ -564,6 +564,11 @@ class AllegroHandDynamicHandover(BaseTask):
 
         self.allegro_hands = []
         self.envs = []
+        self.cameras = []
+        self.camera_tensors = []
+        self.camera_view_matrixs = []
+        self.camera_proj_matrixs = []
+        self.env_origin = torch.zeros((num_envs, 3), dtype=torch.float, device=self.device)
 
         self.object_init_state = []
         self.hand_start_states = []
