@@ -720,7 +720,6 @@ class AllegroHandDynamicHandover(BaseTask):
         should_load_traj_estimator = (
             self.init_traj_estimator_from_model
             or (self.use_traj_estimator and not self.train_estimator)
-            or self.is_test
         )
         if should_load_traj_estimator:
             if not os.path.exists(self.traj_estimator_model_path):
