@@ -123,6 +123,9 @@ class PPO:
             self.evaluate(self.eval_episodes, current_obs)
             return
         else:
+            if self.freeze_policy:
+                print("Frozen PPO stochastic rollout: policy updates and checkpoint saving are disabled.")
+
             rewbuffer = deque(maxlen=100)
             lenbuffer = deque(maxlen=100)
             goal_success_buffer = deque(maxlen=100)
@@ -147,7 +150,11 @@ class PPO:
                         current_obs = self.vec_env.reset()
                         current_states = self.vec_env.get_state()
                     # Compute the action
-                    actions, actions_log_prob, values, mu, sigma = self.actor_critic.act(current_obs, current_states)
+                    if self.freeze_policy:
+                        with torch.no_grad():
+                            actions, actions_log_prob, values, mu, sigma = self.actor_critic.act(current_obs, current_states)
+                    else:
+                        actions, actions_log_prob, values, mu, sigma = self.actor_critic.act(current_obs, current_states)
                     # Step the vec_environment
                     next_obs, rews, dones, infos = self.vec_env.step(actions)
                     next_states = self.vec_env.get_state()
@@ -193,7 +200,11 @@ class PPO:
                     reward_sum.clear()
                     episode_length.clear()
 
-                _, _, last_values, _, _ = self.actor_critic.act(current_obs, current_states)
+                if self.freeze_policy:
+                    with torch.no_grad():
+                        _, _, last_values, _, _ = self.actor_critic.act(current_obs, current_states)
+                else:
+                    _, _, last_values, _, _ = self.actor_critic.act(current_obs, current_states)
                 stop = time.time()
                 collection_time = stop - start
 
