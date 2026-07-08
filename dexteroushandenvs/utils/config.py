@@ -349,6 +349,12 @@ def get_args(benchmark=False, use_rlg_config=False):
             "help": "Comma-separated object names to use, for example: ball or ball,block,pen",
         },
         {
+            "name": "--eval_episodes",
+            "type": int,
+            "default": 1000,
+            "help": "Number of completed episodes to evaluate in test/play mode",
+        },
+        {
             "name": "--train_estimator",
             "action": "store_true",
             "default": False,

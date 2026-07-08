@@ -49,6 +49,7 @@ def process_ppo(args, env, cfg_train, logdir):
               sampler=learn_cfg.get("sampler", 'sequential'),
               log_dir=logdir,
               is_testing=is_testing,
+              eval_episodes=getattr(args, "eval_episodes", 1000),
               print_log=learn_cfg["print_log"],
               apply_reset=False,
               asymmetric=(env.num_states > 0)

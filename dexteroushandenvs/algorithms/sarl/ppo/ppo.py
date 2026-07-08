@@ -40,6 +40,7 @@ class PPO:
                  sampler='sequential',
                  log_dir='run',
                  is_testing=False,
+                 eval_episodes=1000,
                  print_log=True,
                  apply_reset=False,
                  asymmetric=False
@@ -90,6 +91,7 @@ class PPO:
         self.tot_timesteps = 0
         self.tot_time = 0
         self.is_testing = is_testing
+        self.eval_episodes = eval_episodes
         self.current_learning_iteration = 0
 
         self.apply_reset = apply_reset
@@ -111,15 +113,8 @@ class PPO:
         current_states = self.vec_env.get_state()
 
         if self.is_testing:
-            while True:
-                with torch.no_grad():
-                    if self.apply_reset:
-                        current_obs = self.vec_env.reset()
-                    # Compute the action
-                    actions = self.actor_critic.act_inference(current_obs)
-                    # Step the vec_environment
-                    next_obs, rews, dones, infos = self.vec_env.step(actions)
-                    current_obs.copy_(next_obs)
+            self.evaluate(self.eval_episodes, current_obs)
+            return
         else:
             rewbuffer = deque(maxlen=100)
             lenbuffer = deque(maxlen=100)
@@ -211,6 +206,81 @@ class PPO:
                 ep_infos.clear()
 
             self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(num_learning_iterations)))
+
+    def evaluate(self, num_eval_episodes=1000, current_obs=None):
+        if current_obs is None:
+            current_obs = self.vec_env.reset()
+
+        self.actor_critic.eval()
+        num_eval_episodes = int(num_eval_episodes)
+        cur_reward_sum = torch.zeros(self.vec_env.num_envs, dtype=torch.float, device=self.device)
+        episode_rewards = []
+        goal_successes = []
+        hit_successes = []
+        catch_successes = []
+
+        print("PPO eval episodes: {}".format(num_eval_episodes))
+        start = time.time()
+
+        with torch.no_grad():
+            while len(episode_rewards) < num_eval_episodes:
+                if self.apply_reset:
+                    current_obs = self.vec_env.reset()
+
+                actions = self.actor_critic.act_inference(current_obs)
+                next_obs, rews, dones, infos = self.vec_env.step(actions)
+                current_obs.copy_(next_obs)
+
+                cur_reward_sum += rews.to(self.device).view(-1)
+                done_ids = (dones.to(self.device).view(-1) > 0).nonzero(as_tuple=False).flatten()
+
+                if done_ids.numel() > 0:
+                    remaining = num_eval_episodes - len(episode_rewards)
+                    done_ids = done_ids[:remaining]
+
+                    episode_rewards.extend(cur_reward_sum[done_ids].detach().cpu().numpy().tolist())
+
+                    if isinstance(infos, dict):
+                        if "episode_success" in infos:
+                            goal_successes.extend(
+                                infos["episode_success"].to(self.device).view(-1)[done_ids].detach().cpu().numpy().tolist()
+                            )
+                        if "episode_hit_success" in infos:
+                            hit_successes.extend(
+                                infos["episode_hit_success"].to(self.device).view(-1)[done_ids].detach().cpu().numpy().tolist()
+                            )
+                        if "episode_catch_success" in infos:
+                            catch_successes.extend(
+                                infos["episode_catch_success"].to(self.device).view(-1)[done_ids].detach().cpu().numpy().tolist()
+                            )
+
+                    cur_reward_sum[done_ids] = 0
+
+                    if len(episode_rewards) % 1000 == 0 or len(episode_rewards) >= num_eval_episodes:
+                        print("PPO eval progress: {}/{} episodes".format(len(episode_rewards), num_eval_episodes))
+
+        elapsed = time.time() - start
+        avg_reward = float(np.mean(episode_rewards)) if episode_rewards else 0.0
+        max_reward = float(np.max(episode_rewards)) if episode_rewards else 0.0
+        goal_rate = float(np.mean(goal_successes)) if goal_successes else 0.0
+        hit_rate = float(np.mean(hit_successes)) if hit_successes else 0.0
+        catch_rate = float(np.mean(catch_successes)) if catch_successes else 0.0
+
+        print({
+            "eval_average_episode_rewards": avg_reward,
+            "eval_max_episode_rewards": max_reward,
+            "eval_goal_success_rate": goal_rate,
+            "eval_hit_rate": hit_rate,
+            "eval_catch_success_rate": catch_rate,
+            "eval_episodes": len(episode_rewards),
+            "eval_time_sec": elapsed,
+        })
+        print("eval_average_episode_rewards is {}.".format(avg_reward))
+        print("eval_max_episode_rewards is {}.".format(max_reward))
+        print("eval_goal_success_rate is {}.".format(goal_rate))
+        print("eval_hit_rate is {}.".format(hit_rate))
+        print("eval_catch_success_rate is {}.".format(catch_rate))
+        print("eval_episodes is {}.".format(len(episode_rewards)))
 
     def log(self, locs, width=80, pad=35):
         self.tot_timesteps += self.num_transitions_per_env * self.vec_env.num_envs
