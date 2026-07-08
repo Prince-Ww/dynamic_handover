@@ -11,8 +11,9 @@ def process_ppo(args, env, cfg_train, logdir):
     # is_testing = True
     # Override resume and testing flags if they are passed as parameters.
     if args.model_dir != "":
-        is_testing = True
         chkpt_path = args.model_dir
+        if not cfg_train.get("freeze_policy", False):
+            is_testing = True
 
     logdir = logdir + "_seed{}".format(env.task.cfg["seed"])
     if cfg_train.get("prevent_log_overwrite", False) and os.path.isdir(logdir) and os.listdir(logdir):
@@ -50,6 +51,7 @@ def process_ppo(args, env, cfg_train, logdir):
               log_dir=logdir,
               is_testing=is_testing,
               eval_episodes=getattr(args, "eval_episodes", 1000),
+              freeze_policy=cfg_train.get("freeze_policy", False),
               print_log=learn_cfg["print_log"],
               apply_reset=False,
               asymmetric=(env.num_states > 0)
@@ -59,6 +61,9 @@ def process_ppo(args, env, cfg_train, logdir):
     if is_testing and args.model_dir != "":
         print("Loading model from {}".format(chkpt_path))
         ppo.test(chkpt_path)
+    elif args.model_dir != "" and cfg_train.get("freeze_policy", False):
+        print("Loading model for frozen stochastic rollout from {}".format(chkpt_path))
+        ppo.load_for_rollout(chkpt_path)
     elif args.model_dir != "":
         print("Loading model from {}".format(chkpt_path))
         ppo.load(chkpt_path)

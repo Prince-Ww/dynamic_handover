@@ -49,6 +49,8 @@ def apply_training_mode(args, cfg, cfg_train):
         training_mode = "joint_policy_estimator_from_scratch"
     elif train_estimator and args.freeze_policy:
         training_mode = "estimator_only"
+    elif args.freeze_policy:
+        training_mode = "frozen_policy_stochastic_rollout"
     elif use_traj_estimator:
         training_mode = "policy_with_estimator"
     else:

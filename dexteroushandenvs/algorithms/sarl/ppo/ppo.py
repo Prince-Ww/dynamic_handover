@@ -41,6 +41,7 @@ class PPO:
                  log_dir='run',
                  is_testing=False,
                  eval_episodes=1000,
+                 freeze_policy=False,
                  print_log=True,
                  apply_reset=False,
                  asymmetric=False
@@ -92,6 +93,7 @@ class PPO:
         self.tot_time = 0
         self.is_testing = is_testing
         self.eval_episodes = eval_episodes
+        self.freeze_policy = freeze_policy
         self.current_learning_iteration = 0
 
         self.apply_reset = apply_reset
@@ -103,6 +105,11 @@ class PPO:
     def load(self, path):
         self.actor_critic.load_state_dict(torch.load(path))
         self.current_learning_iteration = int(path.split("_")[-1].split(".")[0])
+        self.actor_critic.train()
+
+    def load_for_rollout(self, path):
+        self.actor_critic.load_state_dict(torch.load(path, map_location='cuda:0'))
+        self.current_learning_iteration = 0
         self.actor_critic.train()
 
     def save(self, path):
@@ -194,18 +201,22 @@ class PPO:
 
                 # Learning step
                 start = stop
-                self.storage.compute_returns(last_values, self.gamma, self.lam)
-                mean_value_loss, mean_surrogate_loss = self.update()
+                if self.freeze_policy:
+                    mean_value_loss, mean_surrogate_loss = 0.0, 0.0
+                else:
+                    self.storage.compute_returns(last_values, self.gamma, self.lam)
+                    mean_value_loss, mean_surrogate_loss = self.update()
                 self.storage.clear()
                 stop = time.time()
                 learn_time = stop - start
                 if self.print_log:
                     self.log(locals())
-                if it % log_interval == 0:
+                if not self.freeze_policy and it % log_interval == 0:
                     self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)))
                 ep_infos.clear()
 
-            self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(num_learning_iterations)))
+            if not self.freeze_policy:
+                self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(num_learning_iterations)))
 
     def evaluate(self, num_eval_episodes=1000, current_obs=None):
         if current_obs is None:
