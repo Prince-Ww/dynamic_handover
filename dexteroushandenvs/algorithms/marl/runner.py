@@ -74,6 +74,7 @@ class Runner:
         self.use_eval = config["use_eval"]
         self.eval_interval = config["eval_interval"]
         self.eval_episodes = config["eval_episodes"]
+        self.eval_episodes_per_object = int(config.get("eval_episodes_per_object", 0))
         self.log_interval = config["log_interval"]
         self.freeze_policy = config.get("freeze_policy", False)
         self.deterministic_rollout = config.get("deterministic_rollout", False)
@@ -529,6 +530,13 @@ class Runner:
         eval_episode_successes = []
         eval_episode_hit_successes = []
         eval_episode_catch_successes = []
+        object_names = list(getattr(getattr(self.eval_envs, "task", None), "used_training_objects", []))
+        per_object_enabled = self.eval_episodes_per_object > 0 and len(object_names) > 0
+        have_object_ids = False
+        per_object_rewards = {i: [] for i in range(len(object_names))}
+        per_object_successes = {i: [] for i in range(len(object_names))}
+        per_object_hit_successes = {i: [] for i in range(len(object_names))}
+        per_object_catch_successes = {i: [] for i in range(len(object_names))}
         one_episode_rewards = []
         for eval_i in range(eval_threads):
             one_episode_rewards.append([])
@@ -560,6 +568,7 @@ class Runner:
             episode_success = None
             episode_hit_success = None
             episode_catch_success = None
+            episode_object_id = None
             if isinstance(eval_infos, dict):
                 if "episode_success" in eval_infos:
                     episode_success = eval_infos["episode_success"].to(self.device).flatten()
@@ -567,6 +576,9 @@ class Runner:
                     episode_hit_success = eval_infos["episode_hit_success"].to(self.device).flatten()
                 if "episode_catch_success" in eval_infos:
                     episode_catch_success = eval_infos["episode_catch_success"].to(self.device).flatten()
+                if "object_id" in eval_infos:
+                    episode_object_id = eval_infos["object_id"].to(self.device).flatten().long()
+                    have_object_ids = True
 
             for eval_i in range(eval_threads):
                 one_episode_rewards[eval_i].append(eval_rewards[eval_i])
@@ -582,20 +594,48 @@ class Runner:
 
             for eval_i in range(eval_threads):
                 if eval_dones_env[eval_i]:
+                    obj_id = None
+                    if episode_object_id is not None and eval_i < episode_object_id.numel():
+                        obj_id = int(episode_object_id[eval_i].item())
+                    if per_object_enabled and obj_id in per_object_rewards:
+                        if len(per_object_rewards[obj_id]) >= self.eval_episodes_per_object:
+                            one_episode_rewards[eval_i] = []
+                            continue
+                    ep_reward = torch.sum(torch.cat(one_episode_rewards[eval_i]), dim=0).reshape(-1)
                     eval_episode += 1
-                    eval_episode_rewards.append(torch.sum(torch.cat(one_episode_rewards[eval_i]), dim=0))
+                    eval_episode_rewards.append(ep_reward)
+                    if obj_id in per_object_rewards:
+                        per_object_rewards[obj_id].append(ep_reward)
                     if episode_success is not None:
-                        eval_episode_successes.append(episode_success[eval_i].clone())
+                        success_value = episode_success[eval_i].clone()
+                        eval_episode_successes.append(success_value)
+                        if obj_id in per_object_successes:
+                            per_object_successes[obj_id].append(success_value)
                     if episode_hit_success is not None:
-                        eval_episode_hit_successes.append(episode_hit_success[eval_i].clone())
+                        hit_success_value = episode_hit_success[eval_i].clone()
+                        eval_episode_hit_successes.append(hit_success_value)
+                        if obj_id in per_object_hit_successes:
+                            per_object_hit_successes[obj_id].append(hit_success_value)
                     if episode_catch_success is not None:
-                        eval_episode_catch_successes.append(episode_catch_success[eval_i].clone())
+                        catch_success_value = episode_catch_success[eval_i].clone()
+                        eval_episode_catch_successes.append(catch_success_value)
+                        if obj_id in per_object_catch_successes:
+                            per_object_catch_successes[obj_id].append(catch_success_value)
                     one_episode_rewards[eval_i] = []
 
-            if eval_episode >= self.eval_episodes:
-                eval_episode_rewards = torch.cat(eval_episode_rewards,dim=-1)
+            if per_object_enabled and have_object_ids:
+                finish_eval = all(
+                    len(per_object_rewards[obj_id]) >= self.eval_episodes_per_object
+                    for obj_id in range(len(object_names))
+                )
+            else:
+                finish_eval = eval_episode >= self.eval_episodes
+
+            if finish_eval:
+                eval_episode_rewards = torch.cat(eval_episode_rewards, dim=0)
                 eval_env_infos = {'eval_average_episode_rewards': torch.mean(eval_episode_rewards),
-                                  'eval_max_episode_rewards': torch.max(eval_episode_rewards)}
+                                  'eval_max_episode_rewards': torch.max(eval_episode_rewards),
+                                  'eval_episodes': torch.tensor(float(eval_episode), device=self.device)}
                 if len(eval_episode_successes) != 0:
                     eval_env_infos["eval_goal_success_rate"] = torch.stack(eval_episode_successes).float().mean()
                 if len(eval_episode_hit_successes) != 0:
@@ -603,15 +643,59 @@ class Runner:
                 if len(eval_episode_catch_successes) != 0:
                     eval_env_infos["eval_catch_success_rate"] = torch.stack(eval_episode_catch_successes).float().mean()
 
+                per_object_infos = {}
+                if have_object_ids:
+                    for obj_id, obj_name in enumerate(object_names):
+                        object_episode_count = len(per_object_rewards[obj_id])
+                        if object_episode_count == 0:
+                            continue
+                        object_rewards = torch.cat(per_object_rewards[obj_id], dim=0)
+                        prefix = "eval_object_{}".format(obj_name)
+                        per_object_infos[prefix + "_episodes"] = torch.tensor(
+                            float(object_episode_count), device=self.device
+                        )
+                        per_object_infos[prefix + "_average_episode_rewards"] = torch.mean(object_rewards)
+                        per_object_infos[prefix + "_max_episode_rewards"] = torch.max(object_rewards)
+                        if len(per_object_successes[obj_id]) != 0:
+                            per_object_infos[prefix + "_goal_success_rate"] = torch.stack(
+                                per_object_successes[obj_id]
+                            ).float().mean()
+                        if len(per_object_hit_successes[obj_id]) != 0:
+                            per_object_infos[prefix + "_hit_rate"] = torch.stack(
+                                per_object_hit_successes[obj_id]
+                            ).float().mean()
+                        if len(per_object_catch_successes[obj_id]) != 0:
+                            per_object_infos[prefix + "_catch_success_rate"] = torch.stack(
+                                per_object_catch_successes[obj_id]
+                            ).float().mean()
+                    eval_env_infos.update(per_object_infos)
+
                 print(eval_env_infos)
                 self.log_env(eval_env_infos, total_num_steps)
                 print("eval_average_episode_rewards is {}.".format(torch.mean(eval_episode_rewards)))
+                print("eval_episodes is {}.".format(eval_episode))
                 if "eval_goal_success_rate" in eval_env_infos:
                     print("eval_goal_success_rate is {}.".format(eval_env_infos["eval_goal_success_rate"]))
                 if "eval_hit_rate" in eval_env_infos:
                     print("eval_hit_rate is {}.".format(eval_env_infos["eval_hit_rate"]))
                 if "eval_catch_success_rate" in eval_env_infos:
                     print("eval_catch_success_rate is {}.".format(eval_env_infos["eval_catch_success_rate"]))
+                if have_object_ids:
+                    for obj_id, obj_name in enumerate(object_names):
+                        prefix = "eval_object_{}".format(obj_name)
+                        if prefix + "_episodes" not in eval_env_infos:
+                            continue
+                        print(
+                            "eval_object {}: episodes={}, average_reward={}, goal_success_rate={}, "
+                            "hit_rate={}, catch_success_rate={}.".format(
+                                obj_name,
+                                int(eval_env_infos[prefix + "_episodes"].item()),
+                                eval_env_infos.get(prefix + "_average_episode_rewards"),
+                                eval_env_infos.get(prefix + "_goal_success_rate"),
+                                eval_env_infos.get(prefix + "_hit_rate"),
+                                eval_env_infos.get(prefix + "_catch_success_rate"),
+                            )
+                        )
                 break
 
     @torch.no_grad()

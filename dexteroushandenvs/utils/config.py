@@ -94,6 +94,9 @@ def load_cfg(args, use_rlg_config=False):
     if args.episode_length > 0:
         cfg["env"]["episodeLength"] = args.episode_length
 
+    if getattr(args, "eval_episodes", 0) > 0 and not use_rlg_config:
+        cfg_train["eval_episodes"] = args.eval_episodes
+
     if getattr(args, "used_objects", ""):
         cfg["env"]["usedTrainingObjects"] = [
             name.strip() for name in args.used_objects.split(",") if name.strip()

@@ -180,6 +180,7 @@ class AllegroHandDynamicHandover(BaseTask):
                     unknown_objects, sorted(self.asset_files_dict.keys())
                 )
             )
+        self.object_name_to_id = {name: i for i, name in enumerate(self.used_training_objects)}
         print("Used objects:", self.used_training_objects)
 
         # self.used_training_objects = ["ball", "obj0", "obj1", "obj2", "obj4", "obj6", "obj7", "obj9", "obj10",
@@ -569,6 +570,8 @@ class AllegroHandDynamicHandover(BaseTask):
         self.object_indices = []
         self.goal_object_indices = []
         self.predict_goal_object_indices = []
+        self.env_object_ids = []
+        self.env_object_names = []
 
         first_another_hand_actor = None
 
@@ -606,6 +609,8 @@ class AllegroHandDynamicHandover(BaseTask):
             # add object
             index = i % len(self.used_training_objects)
             select_obj = self.used_training_objects[index]
+            self.env_object_ids.append(index)
+            self.env_object_names.append(select_obj)
             object_handle = self.gym.create_actor(env_ptr, self.object_asset_dict[select_obj]['obj'], object_start_pose, "object", i, 0, 0)
 
             # object_handle = self.gym.create_actor(env_ptr, object_asset, object_start_pose, "object", i, 0, 0)
@@ -683,6 +688,7 @@ class AllegroHandDynamicHandover(BaseTask):
         self.object_indices = to_torch(self.object_indices, dtype=torch.long, device=self.device)
         self.goal_object_indices = to_torch(self.goal_object_indices, dtype=torch.long, device=self.device)
         self.predict_goal_object_indices = to_torch(self.predict_goal_object_indices, dtype=torch.long, device=self.device)
+        self.env_object_ids = to_torch(self.env_object_ids, dtype=torch.long, device=self.device)
 
         self.init_object_tracking = True
         self.test_for_robot_controller = False
@@ -774,6 +780,7 @@ class AllegroHandDynamicHandover(BaseTask):
 
         self.extras['successes'] = self.successes
         self.extras['consecutive_successes'] = self.consecutive_successes
+        self.extras['object_id'] = self.env_object_ids.clone()
         goal_dist_for_log = torch.norm(self.goal_pos - self.object_pos, p=2, dim=-1)
         current_success = (goal_dist_for_log <= self.success_tolerance).float()
         self.episode_success_buf = torch.maximum(self.episode_success_buf, current_success)
