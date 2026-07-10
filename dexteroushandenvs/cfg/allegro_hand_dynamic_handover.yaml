@@ -119,8 +119,8 @@ sim:
     rest_offset: 0.0
     bounce_threshold_velocity: 0.2
     max_depenetration_velocity: 1000.0
-    default_buffer_size_multiplier: 500.0
-    max_gpu_contact_pairs: 16777216
+    default_buffer_size_multiplier: 1000.0
+    max_gpu_contact_pairs: 33554432
     contact_collection: 1 # 0: CC_NEVER (don't collect contact info), 1: CC_LAST_SUBSTEP (collect only contacts on last substep), 2: CC_ALL_SUBSTEPS (default - all contacts)
   flex:
     num_outer_iterations: 5
