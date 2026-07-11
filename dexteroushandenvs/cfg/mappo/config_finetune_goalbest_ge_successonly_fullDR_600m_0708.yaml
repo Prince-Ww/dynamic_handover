@@ -9,7 +9,7 @@ num_env_steps: 600000000
 episode_length: 8
 n_rollout_threads: 80
 n_eval_rollout_threads: 1
-use_linear_lr_decay: True
+use_linear_lr_decay: False
 hidden_size: 512
 hidden_sizes: [1024, 1024, 512]
 use_render: False

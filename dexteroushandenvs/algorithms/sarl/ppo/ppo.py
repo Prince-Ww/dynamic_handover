@@ -5,9 +5,6 @@ import time
 from gym.spaces import Space
 
 import numpy as np
-import statistics
-from collections import deque
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -42,6 +39,7 @@ class PPO:
                  is_testing=False,
                  eval_episodes=1000,
                  freeze_policy=False,
+                 save_interval=500,
                  print_log=True,
                  apply_reset=False,
                  asymmetric=False
@@ -94,7 +92,14 @@ class PPO:
         self.is_testing = is_testing
         self.eval_episodes = eval_episodes
         self.freeze_policy = freeze_policy
+        self.save_interval = save_interval
         self.current_learning_iteration = 0
+        self.best_metrics = {
+            "episode_reward": -float("inf"),
+            "goal_success_rate": -float("inf"),
+            "hit_rate": -float("inf"),
+            "catch_success_rate": -float("inf"),
+        }
 
         self.apply_reset = apply_reset
 
@@ -126,20 +131,14 @@ class PPO:
             if self.freeze_policy:
                 print("Frozen PPO stochastic rollout: policy updates and checkpoint saving are disabled.")
 
-            rewbuffer = deque(maxlen=100)
-            lenbuffer = deque(maxlen=100)
-            goal_success_buffer = deque(maxlen=100)
-            hit_success_buffer = deque(maxlen=100)
-            catch_success_buffer = deque(maxlen=100)
             cur_reward_sum = torch.zeros(self.vec_env.num_envs, dtype=torch.float, device=self.device)
             cur_episode_length = torch.zeros(self.vec_env.num_envs, dtype=torch.float, device=self.device)
-
-            reward_sum = []
-            episode_length = []
 
             for it in range(self.current_learning_iteration, num_learning_iterations):
                 start = time.time()
                 ep_infos = []
+                done_episode_rewards = []
+                done_episode_lengths = []
                 done_episode_successes = []
                 done_episode_hit_successes = []
                 done_episode_catch_successes = []
@@ -166,13 +165,17 @@ class PPO:
                     ep_infos.append(infos)
 
                     if self.print_log:
-                        cur_reward_sum[:] += rews
+                        cur_reward_sum[:] += rews.to(self.device).view(-1)
                         cur_episode_length[:] += 1
 
-                        new_ids = (dones > 0).nonzero(as_tuple=False)
-                        reward_sum.extend(cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
-                        episode_length.extend(cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
-                        done_ids = new_ids.flatten()
+                        done_ids = (dones.to(self.device).view(-1) > 0).nonzero(as_tuple=False).flatten()
+                        if done_ids.numel() > 0:
+                            done_episode_rewards.extend(
+                                cur_reward_sum[done_ids].detach().cpu().numpy().tolist()
+                            )
+                            done_episode_lengths.extend(
+                                cur_episode_length[done_ids].detach().cpu().numpy().tolist()
+                            )
                         if done_ids.numel() > 0 and isinstance(infos, dict):
                             if "episode_success" in infos:
                                 done_episode_successes.extend(
@@ -186,19 +189,29 @@ class PPO:
                                 done_episode_catch_successes.extend(
                                     infos["episode_catch_success"].to(self.device).flatten()[done_ids].cpu().numpy().tolist()
                                 )
-                        cur_reward_sum[new_ids] = 0
-                        cur_episode_length[new_ids] = 0
+                        cur_reward_sum[done_ids] = 0
+                        cur_episode_length[done_ids] = 0
 
+                total_num_steps = (it + 1) * self.num_transitions_per_env * self.vec_env.num_envs
+                rollout_metrics = {}
                 if self.print_log:
-                    # reward_sum = [x[0] for x in reward_sum]
-                    # episode_length = [x[0] for x in episode_length]
-                    rewbuffer.extend(reward_sum)
-                    lenbuffer.extend(episode_length)
-                    goal_success_buffer.extend(done_episode_successes)
-                    hit_success_buffer.extend(done_episode_hit_successes)
-                    catch_success_buffer.extend(done_episode_catch_successes)
-                    reward_sum.clear()
-                    episode_length.clear()
+                    if len(done_episode_rewards) != 0:
+                        rollout_metrics["episode_reward"] = float(np.mean(done_episode_rewards))
+                    if len(done_episode_lengths) != 0:
+                        rollout_metrics["episode_length"] = float(np.mean(done_episode_lengths))
+                    if len(done_episode_successes) != 0:
+                        rollout_metrics["goal_success_rate"] = float(np.mean(done_episode_successes))
+                    if len(done_episode_hit_successes) != 0:
+                        rollout_metrics["hit_rate"] = float(np.mean(done_episode_hit_successes))
+                    if len(done_episode_catch_successes) != 0:
+                        rollout_metrics["catch_success_rate"] = float(np.mean(done_episode_catch_successes))
+
+                # Match MAPPO: best checkpoints reflect the policy that produced
+                # the rollout, so save them before PPO updates on that rollout.
+                if not self.freeze_policy:
+                    for metric_name, metric_value in rollout_metrics.items():
+                        if metric_name in self.best_metrics:
+                            self._maybe_save_best(metric_name, metric_value, it, total_num_steps)
 
                 if self.freeze_policy:
                     with torch.no_grad():
@@ -222,7 +235,7 @@ class PPO:
                 learn_time = stop - start
                 if self.print_log:
                     self.log(locals())
-                if not self.freeze_policy and it % log_interval == 0:
+                if not self.freeze_policy and it % self.save_interval == 0:
                     self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)))
                 ep_infos.clear()
 
@@ -308,10 +321,18 @@ class PPO:
         self.tot_timesteps += self.num_transitions_per_env * self.vec_env.num_envs
         self.tot_time += locs['collection_time'] + locs['learn_time']
         iteration_time = locs['collection_time'] + locs['learn_time']
+        rollout_metrics = locs.get("rollout_metrics", {})
 
         ep_string = f''
+        rollout_success_keys = {
+            "episode_success",
+            "episode_hit_success",
+            "episode_catch_success",
+        }
         if locs['ep_infos']:
             for key in locs['ep_infos'][0]:
+                if key in rollout_success_keys:
+                    continue
                 infotensor = torch.tensor([], device=self.device)
                 for ep_info in locs['ep_infos']:
                     infotensor = torch.cat((infotensor, ep_info[key].to(self.device)))
@@ -325,19 +346,20 @@ class PPO:
         self.writer.add_scalar('Loss/value_function', locs['mean_value_loss'], locs['it'])
         self.writer.add_scalar('Loss/surrogate', locs['mean_surrogate_loss'], locs['it'])
         self.writer.add_scalar('Policy/mean_noise_std', mean_std.item(), locs['it'])
-        if len(locs['rewbuffer']) > 0:
-            self.writer.add_scalar('Train/mean_reward', statistics.mean(locs['rewbuffer']), locs['it'])
-            self.writer.add_scalar('train_episode_rewards', statistics.mean(locs['rewbuffer']), self.tot_timesteps)
+        if "episode_reward" in rollout_metrics:
+            self.writer.add_scalar('Train/mean_reward', rollout_metrics["episode_reward"], locs['it'])
+            self.writer.add_scalar('train_episode_rewards', rollout_metrics["episode_reward"], self.tot_timesteps)
             self.writer.add_scalar('Train/FPS',fps,locs['it'])
-            self.writer.add_scalar('Train/mean_episode_length', statistics.mean(locs['lenbuffer']), locs['it'])
-            self.writer.add_scalar('Train/mean_reward/time', statistics.mean(locs['rewbuffer']), self.tot_time)
-            self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
-        if len(locs['goal_success_buffer']) > 0:
-            self.writer.add_scalar('train_episode_success_rate', statistics.mean(locs['goal_success_buffer']), self.tot_timesteps)
-        if len(locs['hit_success_buffer']) > 0:
-            self.writer.add_scalar('train_episode_hr', statistics.mean(locs['hit_success_buffer']), self.tot_timesteps)
-        if len(locs['catch_success_buffer']) > 0:
-            self.writer.add_scalar('train_episode_sr', statistics.mean(locs['catch_success_buffer']), self.tot_timesteps)
+            self.writer.add_scalar('Train/mean_reward/time', rollout_metrics["episode_reward"], self.tot_time)
+        if "episode_length" in rollout_metrics:
+            self.writer.add_scalar('Train/mean_episode_length', rollout_metrics["episode_length"], locs['it'])
+            self.writer.add_scalar('Train/mean_episode_length/time', rollout_metrics["episode_length"], self.tot_time)
+        if "goal_success_rate" in rollout_metrics:
+            self.writer.add_scalar('train_episode_success_rate', rollout_metrics["goal_success_rate"], self.tot_timesteps)
+        if "hit_rate" in rollout_metrics:
+            self.writer.add_scalar('train_episode_hr', rollout_metrics["hit_rate"], self.tot_timesteps)
+        if "catch_success_rate" in rollout_metrics:
+            self.writer.add_scalar('train_episode_sr', rollout_metrics["catch_success_rate"], self.tot_timesteps)
 
         self.writer.add_scalar('Train2/mean_reward/step', locs['mean_reward'], locs['it'])
         self.writer.add_scalar('Train2/mean_episode_length/episode', locs['mean_trajectory_length'], locs['it'])
@@ -346,7 +368,7 @@ class PPO:
 
         str = f" \033[1m Learning iteration {locs['it']}/{locs['num_learning_iterations']} \033[0m "
 
-        if len(locs['rewbuffer']) > 0:
+        if "episode_reward" in rollout_metrics:
             log_string = (f"""{'#' * width}\n"""
                           f"""{str.center(width, ' ')}\n\n"""
                           f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
@@ -354,11 +376,11 @@ class PPO:
                           f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
                           f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
                           f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
-                          f"""{'Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
-                          f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n"""
-                          f"""{'Mean goal success rate:':>{pad}} {statistics.mean(locs['goal_success_buffer']) if len(locs['goal_success_buffer']) > 0 else 0.0:.4f}\n"""
-                          f"""{'Mean hit rate:':>{pad}} {statistics.mean(locs['hit_success_buffer']) if len(locs['hit_success_buffer']) > 0 else 0.0:.4f}\n"""
-                          f"""{'Mean catch success rate:':>{pad}} {statistics.mean(locs['catch_success_buffer']) if len(locs['catch_success_buffer']) > 0 else 0.0:.4f}\n"""
+                          f"""{'Mean reward:':>{pad}} {rollout_metrics['episode_reward']:.2f}\n"""
+                          f"""{'Mean episode length:':>{pad}} {rollout_metrics.get('episode_length', 0.0):.2f}\n"""
+                          f"""{'Mean goal success rate:':>{pad}} {rollout_metrics.get('goal_success_rate', 0.0):.4f}\n"""
+                          f"""{'Mean hit rate:':>{pad}} {rollout_metrics.get('hit_rate', 0.0):.4f}\n"""
+                          f"""{'Mean catch success rate:':>{pad}} {rollout_metrics.get('catch_success_rate', 0.0):.4f}\n"""
                           f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
                           f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
         else:
@@ -380,6 +402,32 @@ class PPO:
                        f"""{'ETA:':>{pad}} {self.tot_time / (locs['it'] + 1) * (
                                locs['num_learning_iterations'] - locs['it']):.1f}s\n""")
         print(log_string)
+
+    def _maybe_save_best(self, metric_name, metric_value, iteration, total_num_steps):
+        if self.freeze_policy:
+            return
+
+        metric_value = float(metric_value)
+        if metric_value <= self.best_metrics[metric_name] + 1.0e-8:
+            return
+
+        self.best_metrics[metric_name] = metric_value
+        save_name = "best_{}".format(metric_name)
+        checkpoint_dir = os.path.join(self.log_dir, save_name)
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        self.save(os.path.join(checkpoint_dir, "model.pt"))
+
+        info_path = os.path.join(checkpoint_dir, "best_info.txt")
+        with open(info_path, "w") as f:
+            f.write("metric: {}\n".format(metric_name))
+            f.write("value: {:.10f}\n".format(metric_value))
+            f.write("iteration: {}\n".format(iteration))
+            f.write("total_num_steps: {}\n".format(total_num_steps))
+
+        self.writer.add_scalar("best/{}".format(metric_name), metric_value, total_num_steps)
+        print("New best {}: {:.6f} at iteration {}, saved to {}".format(
+            metric_name, metric_value, iteration, checkpoint_dir
+        ))
 
     def update(self):
         mean_value_loss = 0
