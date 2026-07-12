@@ -12,6 +12,13 @@ def process_ppo(args, env, cfg_train, logdir):
     # Override resume and testing flags if they are passed as parameters.
     if args.model_dir != "":
         chkpt_path = args.model_dir
+        if os.path.isdir(chkpt_path):
+            candidate = os.path.join(chkpt_path, "model.pt")
+            if not os.path.isfile(candidate):
+                raise FileNotFoundError(
+                    "PPO model_dir is a directory, but no model.pt was found inside: {}".format(chkpt_path)
+                )
+            chkpt_path = candidate
         if not cfg_train.get("freeze_policy", False):
             is_testing = True
 

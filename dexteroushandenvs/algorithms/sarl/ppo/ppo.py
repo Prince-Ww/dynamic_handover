@@ -361,6 +361,20 @@ class PPO:
         if "catch_success_rate" in rollout_metrics:
             self.writer.add_scalar('train_episode_sr', rollout_metrics["catch_success_rate"], self.tot_timesteps)
 
+        if locs['ep_infos']:
+            estimator_tags = {
+                "pos_loss": "train_traj_estimator_pos_loss",
+                "traj_estimator_success_sample_rate": "train_traj_estimator_success_sample_rate",
+                "traj_estimator_success_sample_count": "train_traj_estimator_success_sample_count",
+            }
+            for info_key, tag in estimator_tags.items():
+                if info_key not in locs['ep_infos'][0]:
+                    continue
+                infotensor = torch.tensor([], device=self.device)
+                for ep_info in locs['ep_infos']:
+                    infotensor = torch.cat((infotensor, ep_info[info_key].to(self.device).flatten()))
+                self.writer.add_scalar(tag, torch.mean(infotensor).item(), self.tot_timesteps)
+
         self.writer.add_scalar('Train2/mean_reward/step', locs['mean_reward'], locs['it'])
         self.writer.add_scalar('Train2/mean_episode_length/episode', locs['mean_trajectory_length'], locs['it'])
 
