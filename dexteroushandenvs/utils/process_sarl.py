@@ -7,7 +7,7 @@ import os
 def process_ppo(args, env, cfg_train, logdir):
     from algorithms.sarl.ppo import PPO, ActorCritic, ActorCriticPointCloud
     learn_cfg = cfg_train["learn"]
-    is_testing = learn_cfg["test"]
+    is_testing = learn_cfg["test"] or getattr(args, "test", False)
     # is_testing = True
     # Override resume and testing flags if they are passed as parameters.
     if args.model_dir != "":
@@ -19,7 +19,12 @@ def process_ppo(args, env, cfg_train, logdir):
                     "PPO model_dir is a directory, but no model.pt was found inside: {}".format(chkpt_path)
                 )
             chkpt_path = candidate
-        if not cfg_train.get("freeze_policy", False):
+        train_from_checkpoint = (
+            getattr(args, "use_traj_estimator", False)
+            and not cfg_train.get("freeze_policy", False)
+            and not is_testing
+        )
+        if not cfg_train.get("freeze_policy", False) and not train_from_checkpoint:
             is_testing = True
 
     logdir = logdir + "_seed{}".format(env.task.cfg["seed"])

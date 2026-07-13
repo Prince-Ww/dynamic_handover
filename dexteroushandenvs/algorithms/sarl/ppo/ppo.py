@@ -109,7 +109,11 @@ class PPO:
 
     def load(self, path):
         self.actor_critic.load_state_dict(torch.load(path))
-        self.current_learning_iteration = int(path.split("_")[-1].split(".")[0])
+        filename = os.path.basename(path)
+        if filename.startswith("model_") and filename.endswith(".pt"):
+            self.current_learning_iteration = int(filename.split("_")[-1].split(".")[0])
+        else:
+            self.current_learning_iteration = 0
         self.actor_critic.train()
 
     def load_for_rollout(self, path):
