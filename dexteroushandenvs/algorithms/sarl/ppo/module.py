@@ -88,6 +88,12 @@ class ActorCritic(nn.Module):
         actions_mean = self.actor(observations)
         return actions_mean
 
+    def act_stochastic_inference(self, observations):
+        actions_mean = self.actor(observations)
+        scale_tril = torch.diag(self.log_std.exp())
+        distribution = MultivariateNormal(actions_mean, scale_tril=scale_tril)
+        return distribution.sample()
+
     def evaluate(self, observations, states, actions):
         actions_mean = self.actor(observations)
 
@@ -213,6 +219,12 @@ class ActorCriticPointCloud(nn.Module):
     def act_inference(self, observations):
         actions_mean = self.actor(observations)
         return actions_mean
+
+    def act_stochastic_inference(self, observations):
+        actions_mean = self.actor(observations)
+        scale_tril = torch.diag(self.log_std.exp())
+        distribution = MultivariateNormal(actions_mean, scale_tril=scale_tril)
+        return distribution.sample()
 
     def evaluate(self, observations, states, actions):
         actions_mean = self.actor(observations)

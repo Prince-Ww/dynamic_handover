@@ -38,6 +38,7 @@ class PPO:
                  log_dir='run',
                  is_testing=False,
                  eval_episodes=1000,
+                 eval_stochastic=False,
                  freeze_policy=False,
                  save_interval=500,
                  print_log=True,
@@ -91,6 +92,7 @@ class PPO:
         self.tot_time = 0
         self.is_testing = is_testing
         self.eval_episodes = eval_episodes
+        self.eval_stochastic = eval_stochastic
         self.freeze_policy = freeze_policy
         self.save_interval = save_interval
         self.current_learning_iteration = 0
@@ -258,7 +260,9 @@ class PPO:
         hit_successes = []
         catch_successes = []
 
+        eval_mode = "stochastic" if self.eval_stochastic else "deterministic"
         print("PPO eval episodes: {}".format(num_eval_episodes))
+        print("PPO eval action mode: {}".format(eval_mode))
         start = time.time()
 
         with torch.no_grad():
@@ -266,7 +270,10 @@ class PPO:
                 if self.apply_reset:
                     current_obs = self.vec_env.reset()
 
-                actions = self.actor_critic.act_inference(current_obs)
+                if self.eval_stochastic:
+                    actions = self.actor_critic.act_stochastic_inference(current_obs)
+                else:
+                    actions = self.actor_critic.act_inference(current_obs)
                 next_obs, rews, dones, infos = self.vec_env.step(actions)
                 current_obs.copy_(next_obs)
 

@@ -358,6 +358,12 @@ def get_args(benchmark=False, use_rlg_config=False):
             "help": "Number of completed episodes to evaluate in test/play mode",
         },
         {
+            "name": "--stochastic_eval",
+            "action": "store_true",
+            "default": False,
+            "help": "Use sampled actions instead of deterministic mean actions during PPO evaluation",
+        },
+        {
             "name": "--train_estimator",
             "action": "store_true",
             "default": False,

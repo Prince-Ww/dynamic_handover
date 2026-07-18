@@ -63,6 +63,7 @@ def process_ppo(args, env, cfg_train, logdir):
               log_dir=logdir,
               is_testing=is_testing,
               eval_episodes=getattr(args, "eval_episodes", 1000),
+              eval_stochastic=getattr(args, "stochastic_eval", False),
               freeze_policy=cfg_train.get("freeze_policy", False),
               save_interval=learn_cfg.get("save_interval", 500),
               print_log=learn_cfg["print_log"],
