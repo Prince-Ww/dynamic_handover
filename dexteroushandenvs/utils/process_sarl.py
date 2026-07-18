@@ -8,6 +8,13 @@ def process_ppo(args, env, cfg_train, logdir):
     from algorithms.sarl.ppo import PPO, ActorCritic, ActorCriticPointCloud
     learn_cfg = cfg_train["learn"]
     is_testing = learn_cfg["test"] or getattr(args, "test", False)
+    finetune_policy = getattr(args, "finetune_policy", False)
+    if finetune_policy and args.model_dir == "":
+        raise ValueError("--finetune_policy requires --model_dir")
+    if finetune_policy and is_testing:
+        raise ValueError("--finetune_policy cannot be combined with --test/play")
+    if finetune_policy and cfg_train.get("freeze_policy", False):
+        raise ValueError("--finetune_policy cannot be combined with --freeze_policy")
     # is_testing = True
     # Override resume and testing flags if they are passed as parameters.
     if args.model_dir != "":
@@ -20,9 +27,12 @@ def process_ppo(args, env, cfg_train, logdir):
                 )
             chkpt_path = candidate
         train_from_checkpoint = (
-            getattr(args, "use_traj_estimator", False)
-            and not cfg_train.get("freeze_policy", False)
-            and not is_testing
+            finetune_policy
+            or (
+                getattr(args, "use_traj_estimator", False)
+                and not cfg_train.get("freeze_policy", False)
+                and not is_testing
+            )
         )
         if not cfg_train.get("freeze_policy", False) and not train_from_checkpoint:
             is_testing = True

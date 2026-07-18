@@ -346,6 +346,12 @@ def get_args(benchmark=False, use_rlg_config=False):
         {"name": "--algo", "type": str, "default": "maddpg", "help": "Choose an algorithm"},
         {"name": "--model_dir", "type": str, "default": "", "help": "Choose a model dir"},
         {
+            "name": "--finetune_policy",
+            "action": "store_true",
+            "default": False,
+            "help": "Load --model_dir and continue policy training instead of entering evaluation mode",
+        },
+        {
             "name": "--used_objects",
             "type": str,
             "default": "",
