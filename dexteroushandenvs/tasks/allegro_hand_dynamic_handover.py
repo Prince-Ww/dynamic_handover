@@ -69,6 +69,9 @@ class AllegroHandDynamicHandover(BaseTask):
         self.action_penalty_scale = self.cfg["env"]["actionPenaltyScale"]
         self.success_tolerance = self.cfg["env"]["successTolerance"]
         self.reach_goal_bonus = self.cfg["env"]["reachGoalBonus"]
+        self.contact_bonus = self.cfg["env"].get("contactBonus", 0.0)
+        self.catch_bonus = self.cfg["env"].get("catchBonus", 0.0)
+        self.joint_success_bonus = self.cfg["env"].get("jointSuccessBonus", 0.0)
         self.fall_dist = self.cfg["env"]["fallDistance"]
         self.fall_penalty = self.cfg["env"]["fallPenalty"]
         self.rot_eps = self.cfg["env"]["rotEps"]
@@ -93,6 +96,14 @@ class AllegroHandDynamicHandover(BaseTask):
         self.max_consecutive_successes = self.cfg["env"]["maxConsecutiveSuccesses"]
         self.av_factor = self.cfg["env"].get("averFactor", 0.01)
         print("Averaging factor: ", self.av_factor)
+        print(
+            "Event reward bonuses: contact={}, catch={}, goal={}, joint={}".format(
+                self.contact_bonus,
+                self.catch_bonus,
+                self.reach_goal_bonus,
+                self.joint_success_bonus,
+            )
+        )
 
         control_freq_inv = self.cfg["env"].get("controlFrequencyInv", 1)
         if self.reset_time > 0.0:
@@ -753,6 +764,7 @@ class AllegroHandDynamicHandover(BaseTask):
         self.object_height_threshold = self.cfg["env"].get("objectHeightThreshold", 0.15)
         self.episode_hit_success_buf = torch.zeros_like(self.rew_buf)
         self.episode_catch_success_buf = torch.zeros_like(self.rew_buf)
+        self.episode_joint_success_buf = torch.zeros_like(self.rew_buf)
         self.catch_hold_buf = torch.zeros_like(self.rew_buf)
 
     def get_internal_state(self):
@@ -768,13 +780,15 @@ class AllegroHandDynamicHandover(BaseTask):
         return None
 
     def compute_reward(self, actions):
+        previous_goal_success = self.episode_success_buf.clone()
+
         self.rew_buf[:], self.reset_buf[:], self.reset_goal_buf[:], self.progress_buf[:], self.successes[:], self.consecutive_successes[:] = compute_hand_reward(
             self.rew_buf, self.reset_buf, self.reset_goal_buf, self.progress_buf, self.successes, self.consecutive_successes,
             self.max_episode_length, self.object_pos, self.object_rot, self.goal_pos, self.goal_rot, self.allegro_left_hand_pos, self.allegro_right_hand_pos, self.allegro_hand_another_thmub_pos, self.aux_up_pos, self.object_linvel, self.leeft_hand_ee_rot,
             self.dist_reward_scale, self.rot_reward_scale, self.rot_eps, self.actions, self.action_penalty_scale, self.allegro_hand_another_ff_pos, self.allegro_hand_another_mf_pos, self.allegro_hand_another_rf_pos, self.allegro_hand_ff_pos, self.allegro_hand_mf_pos, self.allegro_hand_rf_pos, self.a_hand_palm_pos, unscale(self.another_allegro_hand_default_dof_pos[6:],
                                             self.allegro_hand_dof_lower_limits[6:22], self.allegro_hand_dof_upper_limits[6:22]), unscale(self.allegro_hand_another_dof_pos[:, 6:22] ,
                                             self.allegro_hand_dof_lower_limits[6:22], self.allegro_hand_dof_upper_limits[6:22]),
-            self.success_tolerance, self.reach_goal_bonus, self.fall_dist, self.fall_penalty,
+            self.success_tolerance, self.fall_dist, self.fall_penalty,
             self.max_consecutive_successes, self.av_factor, (self.object_type == "pen")
         )
 
@@ -784,13 +798,51 @@ class AllegroHandDynamicHandover(BaseTask):
         goal_dist_for_log = torch.norm(self.goal_pos - self.object_pos, p=2, dim=-1)
         current_success = (goal_dist_for_log <= self.success_tolerance).float()
         self.episode_success_buf = torch.maximum(self.episode_success_buf, current_success)
+        new_goal_success = torch.logical_and(
+            current_success > 0,
+            previous_goal_success <= 0,
+        ).float()
         self.extras['episode_success'] = self.episode_success_buf.clone()
         self.extras['mean_goal_dist'] = goal_dist_for_log.mean().unsqueeze(0)
-        self.update_hit_catch_success_metrics()
+        new_contact, new_catch, episode_catch_success = self.update_hit_catch_success_metrics()
+
+        joint_success = torch.logical_and(
+            self.episode_success_buf > 0,
+            episode_catch_success > 0,
+        ).float()
+        new_joint_success = torch.logical_and(
+            joint_success > 0,
+            self.episode_joint_success_buf <= 0,
+        ).float()
+        self.episode_joint_success_buf = torch.maximum(
+            self.episode_joint_success_buf,
+            joint_success,
+        )
+
+        contact_reward = self.contact_bonus * new_contact
+        catch_reward = self.catch_bonus * new_catch
+        goal_reward = self.reach_goal_bonus * new_goal_success
+        joint_reward = self.joint_success_bonus * new_joint_success
+        event_reward = contact_reward + catch_reward + goal_reward + joint_reward
+        self.rew_buf += event_reward
+
+        self.extras['episode_joint_success'] = self.episode_joint_success_buf.clone()
+        self.extras['reward_contact_bonus'] = contact_reward.mean().unsqueeze(0)
+        self.extras['reward_catch_bonus'] = catch_reward.mean().unsqueeze(0)
+        self.extras['reward_goal_bonus'] = goal_reward.mean().unsqueeze(0)
+        self.extras['reward_joint_success_bonus'] = joint_reward.mean().unsqueeze(0)
+        self.extras['reward_event_bonus'] = event_reward.mean().unsqueeze(0)
+
+        reset_mask = self.reset_buf > 0
         self.episode_success_buf = torch.where(
-            self.reset_buf > 0,
+            reset_mask,
             torch.zeros_like(self.episode_success_buf),
             self.episode_success_buf,
+        )
+        self.episode_joint_success_buf = torch.where(
+            reset_mask,
+            torch.zeros_like(self.episode_joint_success_buf),
+            self.episode_joint_success_buf,
         )
 
         self.total_steps += 1
@@ -807,6 +859,9 @@ class AllegroHandDynamicHandover(BaseTask):
                 print("Post-Reset average consecutive successes = {:.1f}".format(self.total_successes/self.total_resets))
 
     def update_hit_catch_success_metrics(self):
+        previous_hit_success = self.episode_hit_success_buf.clone()
+        previous_catch_success = self.episode_catch_success_buf.clone()
+
         contacts = self.contact_tensor.reshape(self.num_envs, -1, 3)
         all_contact_force = torch.norm(contacts, dim=-1).max(dim=-1).values
         finger_contacts = contacts[:, self.hrsr_finger_contact_indices, :]
@@ -848,6 +903,15 @@ class AllegroHandDynamicHandover(BaseTask):
 
         self.episode_hit_success_buf = torch.maximum(self.episode_hit_success_buf, torch.logical_or(hit_now, catch_now).float())
         self.episode_catch_success_buf = torch.maximum(self.episode_catch_success_buf, catch_now.float())
+        episode_catch_success = self.episode_catch_success_buf.clone()
+        new_contact = torch.logical_and(
+            self.episode_hit_success_buf > 0,
+            previous_hit_success <= 0,
+        ).float()
+        new_catch = torch.logical_and(
+            self.episode_catch_success_buf > 0,
+            previous_catch_success <= 0,
+        ).float()
         self.extras['episode_hit_success'] = self.episode_hit_success_buf.clone()
         self.extras['episode_catch_success'] = self.episode_catch_success_buf.clone()
         self.extras['mean_catcher_palm_dist'] = palm_dist.mean().unsqueeze(0)
@@ -887,6 +951,8 @@ class AllegroHandDynamicHandover(BaseTask):
             torch.zeros_like(self.catch_hold_buf),
             self.catch_hold_buf,
         )
+
+        return new_contact, new_catch, episode_catch_success
 
     def compute_observations(self):
         self.gym.refresh_dof_state_tensor(self.sim)
@@ -1169,6 +1235,7 @@ class AllegroHandDynamicHandover(BaseTask):
         self.episode_success_buf[env_ids] = 0
         self.episode_hit_success_buf[env_ids] = 0
         self.episode_catch_success_buf[env_ids] = 0
+        self.episode_joint_success_buf[env_ids] = 0
         self.catch_hold_buf[env_ids] = 0
 
         self.proprioception_close_loop[env_ids] = self.allegro_hand_dof_pos[env_ids, 0:22].clone()
@@ -1300,7 +1367,7 @@ def compute_hand_reward(
     max_episode_length: float, object_pos, object_rot, target_pos, target_rot, allegro_left_hand_pos, allegro_right_hand_pos, allegro_another_hand_thmub_pos, aux_up_pos, object_vel, leeft_hand_ee_rot,
     dist_reward_scale: float, rot_reward_scale: float, rot_eps: float,
     actions, action_penalty_scale: float, allegro_hand_another_ff_pos, allegro_hand_another_mf_pos, allegro_hand_another_rf_pos, allegro_hand_ff_pos, allegro_hand_mf_pos, allegro_hand_rf_pos, a_hand_palm_pos, hand_init_qpos, hand_qpos,
-    success_tolerance: float, reach_goal_bonus: float, fall_dist: float,
+    success_tolerance: float, fall_dist: float,
     fall_penalty: float, max_consecutive_successes: int, av_factor: float, ignore_z_rot: bool
 ):
     # Distance from the hand to the object
@@ -1328,9 +1395,6 @@ def compute_hand_reward(
     # Find out which envs reach the preset target position and update successes count
     goal_resets = torch.where(goal_dist <= success_tolerance, torch.ones_like(reset_goal_buf), reset_goal_buf)
     successes = successes + goal_resets
-
-    # Success bonus: object position is within `success_tolerance` of target position
-    reward = torch.where(goal_resets == 1, reward + reach_goal_bonus, reward)
 
     # Fall penalty: distance to the goal is larger than a threashold
     # reward = torch.where(object_pos[:, 2] <= 0.2, reward + fall_penalty, reward)

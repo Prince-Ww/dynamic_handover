@@ -307,6 +307,11 @@ class Runner:
                     "debug_hrsr_max_finger_contact_force",
                     "debug_hrsr_max_all_contact_force",
                     "debug_hrsr_min_object_palm_relative_speed",
+                    "reward_contact_bonus",
+                    "reward_catch_bonus",
+                    "reward_goal_bonus",
+                    "reward_joint_success_bonus",
+                    "reward_event_bonus",
                 ]:
                     if key in infos:
                         self.writter.add_scalar(key, infos[key].mean().item(), total_num_steps)

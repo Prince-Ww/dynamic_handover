@@ -24,7 +24,11 @@ env:
   rotRewardScale: 1.0
   rotEps: 0.1
   actionPenaltyScale: -0.003
-  reachGoalBonus: 0
+  # One-time event bonuses per episode.
+  contactBonus: 0.5
+  catchBonus: 2.0
+  reachGoalBonus: 3.0
+  jointSuccessBonus: 5.0
   fallDistance: 0.4
   fallPenalty: 0.0
   objectType: egg
