@@ -309,6 +309,8 @@ class Runner:
                     "debug_hrsr_min_object_palm_relative_speed",
                     "reward_contact_bonus",
                     "reward_catch_bonus",
+                    "reward_catch_duration",
+                    "reward_catch_duration_episode_total",
                     "reward_goal_bonus",
                     "reward_joint_success_bonus",
                     "reward_event_bonus",

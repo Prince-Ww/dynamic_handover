@@ -71,6 +71,8 @@ class AllegroHandDynamicHandover(BaseTask):
         self.reach_goal_bonus = self.cfg["env"]["reachGoalBonus"]
         self.contact_bonus = self.cfg["env"].get("contactBonus", 0.0)
         self.catch_bonus = self.cfg["env"].get("catchBonus", 0.0)
+        self.catch_duration_reward_scale = self.cfg["env"].get("catchDurationRewardScale", 0.0)
+        self.catch_duration_reward_cap = self.cfg["env"].get("catchDurationRewardCap", 0.0)
         self.joint_success_bonus = self.cfg["env"].get("jointSuccessBonus", 0.0)
         self.fall_dist = self.cfg["env"]["fallDistance"]
         self.fall_penalty = self.cfg["env"]["fallPenalty"]
@@ -97,11 +99,14 @@ class AllegroHandDynamicHandover(BaseTask):
         self.av_factor = self.cfg["env"].get("averFactor", 0.01)
         print("Averaging factor: ", self.av_factor)
         print(
-            "Event reward bonuses: contact={}, catch={}, goal={}, joint={}".format(
+            "Event reward bonuses: contact={}, catch={}, goal={}, joint={}; "
+            "catch duration: scale={}, cap={}".format(
                 self.contact_bonus,
                 self.catch_bonus,
                 self.reach_goal_bonus,
                 self.joint_success_bonus,
+                self.catch_duration_reward_scale,
+                self.catch_duration_reward_cap,
             )
         )
 
@@ -766,6 +771,7 @@ class AllegroHandDynamicHandover(BaseTask):
         self.episode_catch_success_buf = torch.zeros_like(self.rew_buf)
         self.episode_joint_success_buf = torch.zeros_like(self.rew_buf)
         self.catch_hold_buf = torch.zeros_like(self.rew_buf)
+        self.catch_duration_reward_buf = torch.zeros_like(self.rew_buf)
 
     def get_internal_state(self):
         return self.root_state_tensor[self.object_indices, 3:7]
@@ -804,7 +810,7 @@ class AllegroHandDynamicHandover(BaseTask):
         ).float()
         self.extras['episode_success'] = self.episode_success_buf.clone()
         self.extras['mean_goal_dist'] = goal_dist_for_log.mean().unsqueeze(0)
-        new_contact, new_catch, episode_catch_success = self.update_hit_catch_success_metrics()
+        new_contact, new_catch, episode_catch_success, catch_reward_condition = self.update_hit_catch_success_metrics()
 
         joint_success = torch.logical_and(
             self.episode_success_buf > 0,
@@ -821,14 +827,25 @@ class AllegroHandDynamicHandover(BaseTask):
 
         contact_reward = self.contact_bonus * new_contact
         catch_reward = self.catch_bonus * new_catch
+        catch_duration_reward = self.catch_duration_reward_scale * catch_reward_condition
+        catch_duration_reward = torch.minimum(
+            catch_duration_reward,
+            torch.clamp(
+                self.catch_duration_reward_cap - self.catch_duration_reward_buf,
+                min=0.0,
+            ),
+        )
+        self.catch_duration_reward_buf += catch_duration_reward
         goal_reward = self.reach_goal_bonus * new_goal_success
         joint_reward = self.joint_success_bonus * new_joint_success
-        event_reward = contact_reward + catch_reward + goal_reward + joint_reward
+        event_reward = contact_reward + catch_reward + catch_duration_reward + goal_reward + joint_reward
         self.rew_buf += event_reward
 
         self.extras['episode_joint_success'] = self.episode_joint_success_buf.clone()
         self.extras['reward_contact_bonus'] = contact_reward.mean().unsqueeze(0)
         self.extras['reward_catch_bonus'] = catch_reward.mean().unsqueeze(0)
+        self.extras['reward_catch_duration'] = catch_duration_reward.mean().unsqueeze(0)
+        self.extras['reward_catch_duration_episode_total'] = self.catch_duration_reward_buf.mean().unsqueeze(0)
         self.extras['reward_goal_bonus'] = goal_reward.mean().unsqueeze(0)
         self.extras['reward_joint_success_bonus'] = joint_reward.mean().unsqueeze(0)
         self.extras['reward_event_bonus'] = event_reward.mean().unsqueeze(0)
@@ -843,6 +860,11 @@ class AllegroHandDynamicHandover(BaseTask):
             reset_mask,
             torch.zeros_like(self.episode_joint_success_buf),
             self.episode_joint_success_buf,
+        )
+        self.catch_duration_reward_buf = torch.where(
+            reset_mask,
+            torch.zeros_like(self.catch_duration_reward_buf),
+            self.catch_duration_reward_buf,
         )
 
         self.total_steps += 1
@@ -952,7 +974,7 @@ class AllegroHandDynamicHandover(BaseTask):
             self.catch_hold_buf,
         )
 
-        return new_contact, new_catch, episode_catch_success
+        return new_contact, new_catch, episode_catch_success, catch_condition.float()
 
     def compute_observations(self):
         self.gym.refresh_dof_state_tensor(self.sim)
@@ -1237,6 +1259,7 @@ class AllegroHandDynamicHandover(BaseTask):
         self.episode_catch_success_buf[env_ids] = 0
         self.episode_joint_success_buf[env_ids] = 0
         self.catch_hold_buf[env_ids] = 0
+        self.catch_duration_reward_buf[env_ids] = 0
 
         self.proprioception_close_loop[env_ids] = self.allegro_hand_dof_pos[env_ids, 0:22].clone()
 
