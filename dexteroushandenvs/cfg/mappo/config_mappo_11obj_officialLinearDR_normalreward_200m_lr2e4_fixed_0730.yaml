@@ -1,7 +1,7 @@
 env_name: mappo
 algorithm_name: mappo
-experiment_name: mappo_3obj_immediateFullDR_normalreward_200m_lr2e4_fixed_0730
-run_dir: ./logs_mappo_3obj_immediateFullDR_normalreward_200m_lr2e4_fixed_0730
+experiment_name: mappo_11obj_officialLinearDR_normalreward_200m_lr2e4_fixed_0730
+run_dir: ./logs_mappo_11obj_officialLinearDR_normalreward_200m_lr2e4_fixed_0730
 prevent_log_overwrite: True
 
 use_centralized_V: True
