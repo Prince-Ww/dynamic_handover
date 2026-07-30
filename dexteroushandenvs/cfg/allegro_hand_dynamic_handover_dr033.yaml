@@ -82,15 +82,14 @@ task:
         schedule: "linear"
         schedule_steps: 40000
     actor_params:
-      hand:
+      hand: &hand_randomization
         color: True
         rigid_body_properties:
           mass:
             range: [0.8333333333, 1.1666666667]
             operation: "scaling"
             distribution: "uniform"
-            schedule: "linear"
-            schedule_steps: 30000
+            setup_only: True
         rigid_shape_properties:
           friction:
             num_buckets: 250
@@ -99,20 +98,19 @@ task:
             distribution: "uniform"
             schedule: "linear"
             schedule_steps: 30000
+      another_hand: *hand_randomization
       object:
         scale:
           range: [0.9833333333, 1.0166666667]
           operation: "scaling"
           distribution: "uniform"
-          schedule: "linear"
-          schedule_steps: 30000
+          setup_only: True
         rigid_body_properties:
           mass:
             range: [0.8333333333, 1.1666666667]
             operation: "scaling"
             distribution: "uniform"
-            schedule: "linear"
-            schedule_steps: 30000
+            setup_only: True
         rigid_shape_properties:
           friction:
             num_buckets: 250

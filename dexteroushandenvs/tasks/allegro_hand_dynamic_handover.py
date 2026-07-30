@@ -387,6 +387,16 @@ class AllegroHandDynamicHandover(BaseTask):
         self.create_object_asset_dict(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../assets'))
         self._create_ground_plane()
         self._create_envs(self.num_envs, self.cfg["env"]['envSpacing'], int(np.sqrt(self.num_envs)))
+        if self.randomize:
+            # Mass and actor scale are setup-only on the GPU pipeline, so the
+            # first DR pass must happen after actor creation and before
+            # prepare_sim().
+            self.apply_randomizations(self.randomization_params)
+            print(
+                "Domain randomization initialized before prepare_sim for actors: {}".format(
+                    list(self.randomization_params["actor_params"].keys())
+                )
+            )
 
     def _find_contact_body_indices(self, env_ptr, actor_handle, body_names, label):
         body_indices = []
@@ -650,7 +660,16 @@ class AllegroHandDynamicHandover(BaseTask):
             hand_shape_props = self.gym.get_actor_rigid_shape_properties(env_ptr, allegro_hand_actor)
             for hand_shape_prop in hand_shape_props:
                 hand_shape_prop.restitution = 0.
-            self.gym.set_actor_rigid_shape_properties(env_ptr, object_handle, hand_shape_props)
+            self.gym.set_actor_rigid_shape_properties(env_ptr, allegro_hand_actor, hand_shape_props)
+
+            another_hand_shape_props = self.gym.get_actor_rigid_shape_properties(
+                env_ptr, allegro_hand_another_actor
+            )
+            for another_hand_shape_prop in another_hand_shape_props:
+                another_hand_shape_prop.restitution = 0.
+            self.gym.set_actor_rigid_shape_properties(
+                env_ptr, allegro_hand_another_actor, another_hand_shape_props
+            )
 
             # add goal object
             goal_handle = self.gym.create_actor(env_ptr, self.object_asset_dict[select_obj]['goal'], goal_start_pose, "goal_object", i + self.num_envs, 0, 0)

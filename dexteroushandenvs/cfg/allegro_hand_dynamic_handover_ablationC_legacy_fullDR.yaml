@@ -1,7 +1,7 @@
-# Reward ablation A: keep only the one-time goal event bonus.
+# Reward ablation C with the legacy full-DR setup used by earlier PPO runs.
 env:
   env_name: "allegro_hand_dynamic_handover"
-  numEnvs: 2048
+  numEnvs: 1024
   envSpacing: 1.25
   episodeLength: 30
   enableDebugVis: False
@@ -15,7 +15,7 @@ env:
   useRelativeControl: False
   dofSpeedScale: 100.0
   actionsMovingAverage: 1.0
-  controlFrequencyInv: 3 # 60 Hz simulation / 20 Hz control
+  controlFrequencyInv: 3
 
   startPositionNoise: 0.0
   startRotationNoise: 0.0
@@ -29,9 +29,10 @@ env:
   rotRewardScale: 1.0
   rotEps: 0.1
   actionPenaltyScale: -0.003
-  # Ablation A: only the goal event can add a one-time bonus.
   contactBonus: 0.0
   catchBonus: 0.0
+  catchDurationRewardScale: 0.5
+  catchDurationRewardCap: 5.0
   reachGoalBonus: 3.0
   jointSuccessBonus: 0.0
   fallDistance: 0.4
@@ -85,7 +86,7 @@ task:
         schedule: "linear"
         schedule_steps: 40000
     actor_params:
-      hand: &hand_randomization
+      hand:
         color: True
         tendon_properties:
           damping:
@@ -130,7 +131,8 @@ task:
             range: [0.5, 1.5]
             operation: "scaling"
             distribution: "uniform"
-            setup_only: True
+            schedule: "linear"
+            schedule_steps: 30000
         rigid_shape_properties:
           friction:
             num_buckets: 250
@@ -139,19 +141,20 @@ task:
             distribution: "uniform"
             schedule: "linear"
             schedule_steps: 30000
-      another_hand: *hand_randomization
       object:
         scale:
           range: [0.95, 1.05]
           operation: "scaling"
           distribution: "uniform"
-          setup_only: True
+          schedule: "linear"
+          schedule_steps: 30000
         rigid_body_properties:
           mass:
             range: [0.5, 1.5]
             operation: "scaling"
             distribution: "uniform"
-            setup_only: True
+            schedule: "linear"
+            schedule_steps: 30000
         rigid_shape_properties:
           friction:
             num_buckets: 250

@@ -71,6 +71,9 @@ class BaseTask():
             self.num_envs, device=self.device, dtype=torch.long)
         self.extras = {}
 
+        # Actor properties must be cached per actor and per environment. A
+        # property-name-only cache mixes hand and object baselines and also
+        # mixes object assets with different physical properties.
         self.original_props = {}
         self.dr_randomizations = {}
         self.first_randomization = True
@@ -391,6 +394,12 @@ class BaseTask():
             for env_id in env_ids:
                 env = self.envs[env_id]
                 handle = self.gym.find_actor_handle(env, actor)
+                if handle < 0:
+                    raise RuntimeError(
+                        "Domain randomization actor '{}' was not found in environment {}".format(
+                            actor, env_id
+                        )
+                    )
                 extern_sample = self.extern_actor_params[env_id]
 
                 for prop_name, prop_attrs in actor_properties.items():
@@ -403,45 +412,88 @@ class BaseTask():
                         continue
                     if prop_name == 'scale':
                         attr_randomization_params = prop_attrs
-                        sample = generate_random_samples(attr_randomization_params, 1,
+                        if attr_randomization_params.get('setup_only', False) and not self.first_randomization:
+                            continue
+                        sample_params = {
+                            key: value for key, value in attr_randomization_params.items()
+                            if key != 'setup_only'
+                        }
+                        sample = generate_random_samples(sample_params, 1,
                                                          self.last_step, None)
                         og_scale = 1
-                        if attr_randomization_params['operation'] == 'scaling':
+                        if sample_params['operation'] == 'scaling':
                             new_scale = og_scale * sample
-                        elif attr_randomization_params['operation'] == 'additive':
+                        elif sample_params['operation'] == 'additive':
                             new_scale = og_scale + sample
                         self.gym.set_actor_scale(env, handle, new_scale)
                         continue
 
                     prop = param_getters_map[prop_name](env, handle)
+                    original_prop_key = (actor, env_id, prop_name)
+                    property_changed = False
                     if isinstance(prop, list):
                         if self.first_randomization:
-                            self.original_props[prop_name] = [
+                            self.original_props[original_prop_key] = [
                                 {attr: getattr(p, attr) for attr in dir(p)} for p in prop]
-                        for p, og_p in zip(prop, self.original_props[prop_name]):
+                        original_prop = self.original_props.get(original_prop_key)
+                        if original_prop is None:
+                            raise RuntimeError(
+                                "Missing original domain randomization properties for {}".format(
+                                    original_prop_key
+                                )
+                            )
+                        if len(prop) != len(original_prop):
+                            raise RuntimeError(
+                                "Domain randomization property count changed for {}: {} != {}".format(
+                                    original_prop_key, len(prop), len(original_prop)
+                                )
+                            )
+                        for p, og_p in zip(prop, original_prop):
                             for attr, attr_randomization_params in prop_attrs.items():
+                                if attr_randomization_params.get('setup_only', False) and not self.first_randomization:
+                                    continue
                                 smpl = None
                                 if self.actor_params_generator is not None:
                                     smpl, extern_offsets[env_id] = get_attr_val_from_sample(
                                         extern_sample, extern_offsets[env_id], p, attr)
+                                sample_params = {
+                                    key: value for key, value in attr_randomization_params.items()
+                                    if key != 'setup_only'
+                                }
                                 apply_random_samples(
-                                    p, og_p, attr, attr_randomization_params,
+                                    p, og_p, attr, sample_params,
                                     self.last_step, smpl)
+                                property_changed = True
                     else:
                         if self.first_randomization:
-                            self.original_props[prop_name] = deepcopy(prop)
+                            self.original_props[original_prop_key] = deepcopy(prop)
+                        original_prop = self.original_props.get(original_prop_key)
+                        if original_prop is None:
+                            raise RuntimeError(
+                                "Missing original domain randomization properties for {}".format(
+                                    original_prop_key
+                                )
+                            )
                         for attr, attr_randomization_params in prop_attrs.items():
+                            if attr_randomization_params.get('setup_only', False) and not self.first_randomization:
+                                continue
                             smpl = None
                             if self.actor_params_generator is not None:
                                 smpl, extern_offsets[env_id] = get_attr_val_from_sample(
                                     extern_sample, extern_offsets[env_id], prop, attr)
+                            sample_params = {
+                                key: value for key, value in attr_randomization_params.items()
+                                if key != 'setup_only'
+                            }
                             apply_random_samples(
-                                prop, self.original_props[prop_name], attr,
-                                attr_randomization_params, self.last_step, smpl)
+                                prop, original_prop, attr,
+                                sample_params, self.last_step, smpl)
+                            property_changed = True
 
-                    setter = param_setters_map[prop_name]
-                    default_args = param_setter_defaults_map[prop_name]
-                    setter(env, handle, prop, *default_args)
+                    if property_changed:
+                        setter = param_setters_map[prop_name]
+                        default_args = param_setter_defaults_map[prop_name]
+                        setter(env, handle, prop, *default_args)
 
         if self.actor_params_generator is not None:
             for env_id in env_ids:  # check that we used all dims in sample

@@ -85,7 +85,7 @@ task:
         schedule: "linear"
         schedule_steps: 40000
     actor_params:
-      hand:
+      hand: &hand_randomization
         color: True
         tendon_properties:
           damping:
@@ -130,8 +130,7 @@ task:
             range: [0.5, 1.5]
             operation: "scaling"
             distribution: "uniform"
-            schedule: "linear"
-            schedule_steps: 30000
+            setup_only: True
         rigid_shape_properties:
           friction:
             num_buckets: 250
@@ -140,20 +139,19 @@ task:
             distribution: "uniform"
             schedule: "linear"
             schedule_steps: 30000
+      another_hand: *hand_randomization
       object:
         scale:
           range: [0.95, 1.05]
           operation: "scaling"
           distribution: "uniform"
-          schedule: "linear"
-          schedule_steps: 30000
+          setup_only: True
         rigid_body_properties:
           mass:
             range: [0.5, 1.5]
             operation: "scaling"
             distribution: "uniform"
-            schedule: "linear"
-            schedule_steps: 30000
+            setup_only: True
         rigid_shape_properties:
           friction:
             num_buckets: 250
