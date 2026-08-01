@@ -61,7 +61,9 @@ class AllegroHandDynamicHandover(BaseTask):
         self.is_multi_agent = is_multi_agent
 
         self.randomize = self.cfg["task"]["randomize"]
-        self.randomization_params = self.cfg["task"]["randomization_params"]
+        self.randomization_params = self.cfg["task"].get("randomization_params", {})
+        if self.randomize and not self.randomization_params:
+            raise ValueError("task.randomize is enabled, but task.randomization_params is missing or empty")
         self.aggregate_mode = self.cfg["env"]["aggregateMode"]
 
         self.dist_reward_scale = self.cfg["env"]["distRewardScale"]
@@ -265,6 +267,9 @@ class AllegroHandDynamicHandover(BaseTask):
             self.pointCloudVisualizer = None
 
         super().__init__(cfg=self.cfg)
+        # reset_buf is cleared during an immediate reset. Keep the terminal mask
+        # separately so the RL wrapper still returns the correct done signal.
+        self.rl_done_buf = torch.zeros_like(self.reset_buf)
 
         if self.viewer != None:
             cam_pos = gymapi.Vec3(0.9, -0.65, 1.0)
@@ -394,7 +399,7 @@ class AllegroHandDynamicHandover(BaseTask):
             self.apply_randomizations(self.randomization_params)
             print(
                 "Domain randomization initialized before prepare_sim for actors: {}".format(
-                    list(self.randomization_params["actor_params"].keys())
+                    list(self.randomization_params.get("actor_params", {}).keys())
                 )
             )
 
@@ -995,7 +1000,7 @@ class AllegroHandDynamicHandover(BaseTask):
 
         return new_contact, new_catch, episode_catch_success, catch_condition.float()
 
-    def compute_observations(self):
+    def compute_observations(self, update_estimator=True):
         self.gym.refresh_dof_state_tensor(self.sim)
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_rigid_body_state_tensor(self.sim)
@@ -1045,12 +1050,12 @@ class AllegroHandDynamicHandover(BaseTask):
 
         self.aux_up_pos = to_torch([0, -0.52, 0.45], dtype=torch.float, device=self.device).repeat((self.num_envs, 1))
 
-        self.compute_sim2real_observation(rand_floats)
+        self.compute_sim2real_observation(rand_floats, update_estimator=update_estimator)
 
         if self.asymmetric_obs:
             self.compute_sim2real_asymmetric_obs(rand_floats)
 
-    def compute_sim2real_observation(self, rand_floats):
+    def compute_sim2real_observation(self, rand_floats, update_estimator=True):
         # obs: 0~150
         self.obs_buf[:, 0:22] = unscale(self.allegro_hand_dof_pos,
                                             self.allegro_hand_dof_lower_limits, self.allegro_hand_dof_upper_limits)
@@ -1075,7 +1080,7 @@ class AllegroHandDynamicHandover(BaseTask):
             else:
                 self.object_state_stack_frames[:, (i)*3:(i+1)*3] = self.object_state_stack_frames[:, (i+1)*3:(i+2)*3].clone()
 
-        if self.train_estimator:
+        if self.train_estimator and update_estimator:
             with TemporaryGrad():
                 self.predict_pose, self.pose_latent_vector = self.predict_contact_pose(self.traj_estimator, self.object_state_stack_frames)
                 self.update_contact_slamer(self.predict_pose)
@@ -1279,18 +1284,21 @@ class AllegroHandDynamicHandover(BaseTask):
         self.episode_joint_success_buf[env_ids] = 0
         self.catch_hold_buf[env_ids] = 0
         self.catch_duration_reward_buf[env_ids] = 0
+        self.actions[env_ids] = 0.0
 
         self.proprioception_close_loop[env_ids] = self.allegro_hand_dof_pos[env_ids, 0:22].clone()
 
         self.object_state_stack_frames[env_ids] = torch.zeros_like(self.object_state_stack_frames[env_ids])
+        for frame in self.obs_buf_stack_frames:
+            frame[env_ids] = 0.0
+        for frame in self.state_buf_stack_frames:
+            frame[env_ids] = 0.0
 
         # if 1 in env_ids:
         self.init_object_tracking = True
         self.gym.clear_lines(self.viewer)
 
-    def pre_physics_step(self, actions):
-        self.actions = actions.clone().to(self.device)
-
+    def _reset_pending_envs(self):
         env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
         goal_env_ids = self.reset_goal_buf.nonzero(as_tuple=False).squeeze(-1)
 
@@ -1303,6 +1311,15 @@ class AllegroHandDynamicHandover(BaseTask):
 
         if len(env_ids) > 0:
             self.reset(env_ids, goal_env_ids)
+
+        return env_ids, goal_env_ids
+
+    def pre_physics_step(self, actions):
+        self.actions = actions.clone().to(self.device)
+
+        # Handles the initial reset. Episode resets are normally completed in
+        # post_physics_step so the returned observation belongs to the next episode.
+        self._reset_pending_envs()
 
 
         self.cur_targets[:, self.actuated_dof_indices + 6] = scale(self.actions[:, 6:22],
@@ -1317,7 +1334,7 @@ class AllegroHandDynamicHandover(BaseTask):
                                                                                                     self.actuated_dof_indices + 6] + (1.0 - self.act_moving_average) * self.prev_targets[:, self.actuated_dof_indices + 6]
 
         self.cur_targets[:, self.actuated_dof_indices + 28] = self.act_moving_average * self.cur_targets[:,
-                                                                                                    self.actuated_dof_indices + 22] + (1.0 - self.act_moving_average) * self.prev_targets[:, self.actuated_dof_indices + 22]
+                                                                                                    self.actuated_dof_indices + 28] + (1.0 - self.act_moving_average) * self.prev_targets[:, self.actuated_dof_indices + 28]
 
         self.cur_targets[:, 0:22] = tensor_clamp(self.cur_targets[:, 0:22],
                                                 self.allegro_hand_dof_lower_limits[:],
@@ -1375,6 +1392,14 @@ class AllegroHandDynamicHandover(BaseTask):
 
         self.compute_observations()
         self.compute_reward(self.actions)
+        self.rl_done_buf.copy_(self.reset_buf)
+
+        # PPO must receive the first observation of the new episode together
+        # with the terminal mask. Delaying this reset until the next action
+        # would pair a terminal observation with an action applied after reset.
+        reset_env_ids, reset_goal_env_ids = self._reset_pending_envs()
+        if len(reset_env_ids) > 0 or len(reset_goal_env_ids) > 0:
+            self.compute_observations(update_estimator=False)
         # self.gym.clear_lines(self.viewer)
         # self.gym.refresh_rigid_body_state_tensor(self.sim)
 

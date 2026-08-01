@@ -32,9 +32,9 @@ class MultiVecTaskAllegro():
 
         self.clip_obs = clip_observations
         self.clip_actions = clip_actions
-        self.rl_device = task.device
+        self.rl_device = rl_device
 
-        print("RL device: ", task.device)
+        print("RL device: ", self.rl_device)
 
         # COMPATIBILITY
         self.obs_space = [spaces.Box(low=-np.Inf, high=np.Inf, shape=(450,)) for _ in range(self.num_agents)]
@@ -106,7 +106,7 @@ class MultiVecTaskPythonAllegro(MultiVecTaskAllegro):
         state_buf = torch.clamp(self.task.states_buf, -self.clip_obs, self.clip_obs)
 
         rewards = self.task.rew_buf.unsqueeze(-1).to(self.rl_device)
-        dones = self.task.reset_buf.to(self.rl_device)
+        dones = getattr(self.task, "rl_done_buf", self.task.reset_buf).to(self.rl_device)
 
         sub_agent_obs = []
         agent_state = []

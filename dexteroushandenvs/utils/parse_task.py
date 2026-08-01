@@ -68,7 +68,12 @@ def parse_task(args, cfg, cfg_train, sim_params, agent_index):
         if args.task == "OneFrankaCabinet" :
             env = VecTaskPythonArm(task, rl_device)
         else :
-            env = VecTaskPython(task, rl_device)
+            env = VecTaskPython(
+                task,
+                rl_device,
+                cfg_train.get("clip_observations", 5.0),
+                cfg_train.get("clip_actions", 1.0),
+            )
 
     elif args.task_type == "MultiAgent":
         print("Task type: MultiAgent")

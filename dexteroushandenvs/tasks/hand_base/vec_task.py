@@ -30,9 +30,9 @@ class VecTask():
 
         self.clip_obs = clip_observations
         self.clip_actions = clip_actions
-        self.rl_device = task.device
+        self.rl_device = rl_device
 
-        print("RL device: ", task.device)
+        print("RL device: ", self.rl_device)
 
         self.info = {}
         self.info['action_space'] = self.act_space
@@ -132,7 +132,12 @@ class VecTaskPython(VecTask):
 
         self.task.step(actions_tensor)
 
-        return torch.clamp(self.task.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device), self.task.rew_buf.to(self.rl_device), self.task.reset_buf.to(self.rl_device), self.task.extras
+        dones = getattr(self.task, "rl_done_buf", self.task.reset_buf)
+        infos = {
+            key: value.detach().clone() if torch.is_tensor(value) else value
+            for key, value in self.task.extras.items()
+        }
+        return torch.clamp(self.task.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device), self.task.rew_buf.to(self.rl_device), dones.to(self.rl_device), infos
 
     def reset(self):
         actions = 0.01 * (1 - 2 * torch.rand([self.task.num_envs, self.task.num_actions], dtype=torch.float32, device=self.rl_device))

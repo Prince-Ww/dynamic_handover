@@ -9,6 +9,12 @@ def process_ppo(args, env, cfg_train, logdir):
     learn_cfg = cfg_train["learn"]
     is_testing = learn_cfg["test"] or getattr(args, "test", False)
     finetune_policy = getattr(args, "finetune_policy", False)
+    if getattr(args, "resume", 0) > 0:
+        raise ValueError(
+            "PPO --resume is not an exact resume: legacy checkpoints contain only model weights, "
+            "not optimizer or RNG state. Use --model_dir with --finetune_policy to start a new "
+            "optimization run from saved weights."
+        )
     if finetune_policy and args.model_dir == "":
         raise ValueError("--finetune_policy requires --model_dir")
     if finetune_policy and is_testing:
@@ -63,6 +69,8 @@ def process_ppo(args, env, cfg_train, logdir):
               value_loss_coef=learn_cfg.get("value_loss_coef", 2.0),
               entropy_coef=learn_cfg["ent_coef"],
               learning_rate=learn_cfg["optim_stepsize"],
+              actor_learning_rate=learn_cfg.get("actor_optim_stepsize", learn_cfg["optim_stepsize"]),
+              critic_learning_rate=learn_cfg.get("critic_optim_stepsize", learn_cfg["optim_stepsize"]),
               max_grad_norm=learn_cfg.get("max_grad_norm", 2.0),
               use_clipped_value_loss=learn_cfg.get("use_clipped_value_loss", False),
               schedule=learn_cfg.get("schedule", "fixed"),

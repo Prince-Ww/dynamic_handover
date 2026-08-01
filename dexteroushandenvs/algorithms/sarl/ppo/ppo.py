@@ -28,6 +28,8 @@ class PPO:
                  value_loss_coef=1.0,
                  entropy_coef=0.0,
                  learning_rate=1e-3,
+                 actor_learning_rate=None,
+                 critic_learning_rate=None,
                  max_grad_norm=0.5,
                  use_clipped_value_loss=True,
                  schedule="fixed",
@@ -52,6 +54,25 @@ class PPO:
             raise TypeError("vec_env.state_space must be a gym Space")
         if not isinstance(vec_env.action_space, Space):
             raise TypeError("vec_env.action_space must be a gym Space")
+        if num_transitions_per_env <= 0:
+            raise ValueError("num_transitions_per_env must be positive")
+        if num_learning_epochs <= 0 or num_mini_batches <= 0:
+            raise ValueError("num_learning_epochs and num_mini_batches must be positive")
+        rollout_batch_size = vec_env.num_envs * num_transitions_per_env
+        if rollout_batch_size % num_mini_batches != 0:
+            raise ValueError(
+                "PPO rollout batch size ({}) must be divisible by num_mini_batches ({})".format(
+                    rollout_batch_size, num_mini_batches
+                )
+            )
+        if init_noise_std <= 0:
+            raise ValueError("init_noise_std must be positive")
+        actor_learning_rate = learning_rate if actor_learning_rate is None else actor_learning_rate
+        critic_learning_rate = learning_rate if critic_learning_rate is None else critic_learning_rate
+        if actor_learning_rate <= 0 or critic_learning_rate <= 0:
+            raise ValueError("actor_learning_rate and critic_learning_rate must be positive")
+        if not 0.0 <= gamma <= 1.0 or not 0.0 <= lam <= 1.0:
+            raise ValueError("gamma and lam must be in [0, 1]")
         self.observation_space = vec_env.observation_space
         self.action_space = vec_env.action_space
         self.state_space = vec_env.state_space
@@ -61,7 +82,8 @@ class PPO:
 
         self.desired_kl = desired_kl
         self.schedule = schedule
-        self.step_size = learning_rate
+        self.actor_step_size = actor_learning_rate
+        self.critic_step_size = critic_learning_rate
 
         # PPO components
         self.vec_env = vec_env
@@ -70,7 +92,30 @@ class PPO:
         self.actor_critic.to(self.device)
         self.storage = RolloutStorage(self.vec_env.num_envs, num_transitions_per_env, self.observation_space.shape,
                                       self.state_space.shape, self.action_space.shape, self.device, sampler)
-        self.optimizer = optim.Adam(self.actor_critic.parameters(), lr=learning_rate)
+        actor_module_parameters = list(self.actor_critic.actor.parameters())
+        critic_module_parameters = list(self.actor_critic.critic.parameters())
+        actor_ids = {id(param) for param in actor_module_parameters}
+        critic_ids = {id(param) for param in critic_module_parameters}
+        shared_ids = actor_ids & critic_ids
+
+        self.actor_parameters = [
+            param for param in actor_module_parameters if id(param) not in shared_ids
+        ] + [self.actor_critic.log_std]
+        self.critic_parameters = [
+            param for param in critic_module_parameters if id(param) not in shared_ids
+        ]
+        self.shared_parameters = [
+            param for param in actor_module_parameters if id(param) in shared_ids
+        ]
+
+        self.actor_optimizer = optim.Adam(self.actor_parameters, lr=actor_learning_rate)
+        self.critic_optimizer = optim.Adam(self.critic_parameters, lr=critic_learning_rate)
+        self.shared_optimizer = None
+        if self.shared_parameters:
+            self.shared_optimizer = optim.Adam(
+                self.shared_parameters,
+                lr=min(actor_learning_rate, critic_learning_rate),
+            )
 
         # PPO parameters
         self.clip_param = clip_param
@@ -102,24 +147,28 @@ class PPO:
             "hit_rate": -float("inf"),
             "catch_success_rate": -float("inf"),
         }
+        self.last_actor_grad_norm = 0.0
+        self.last_critic_grad_norm = 0.0
+        self.last_shared_grad_norm = 0.0
 
         self.apply_reset = apply_reset
 
     def test(self, path):
-        self.actor_critic.load_state_dict(torch.load(path, map_location='cuda:0'))
+        self.actor_critic.load_state_dict(torch.load(path, map_location=self.device))
         self.actor_critic.eval()
 
     def load(self, path):
-        self.actor_critic.load_state_dict(torch.load(path))
+        self.actor_critic.load_state_dict(torch.load(path, map_location=self.device))
         filename = os.path.basename(path)
         if filename.startswith("model_") and filename.endswith(".pt"):
-            self.current_learning_iteration = int(filename.split("_")[-1].split(".")[0])
+            # model_N is saved after iteration N, so continue at N + 1.
+            self.current_learning_iteration = int(filename.split("_")[-1].split(".")[0]) + 1
         else:
             self.current_learning_iteration = 0
         self.actor_critic.train()
 
     def load_for_rollout(self, path):
-        self.actor_critic.load_state_dict(torch.load(path, map_location='cuda:0'))
+        self.actor_critic.load_state_dict(torch.load(path, map_location=self.device))
         self.current_learning_iteration = 0
         self.actor_critic.train()
 
@@ -155,10 +204,7 @@ class PPO:
                         current_obs = self.vec_env.reset()
                         current_states = self.vec_env.get_state()
                     # Compute the action
-                    if self.freeze_policy:
-                        with torch.no_grad():
-                            actions, actions_log_prob, values, mu, sigma = self.actor_critic.act(current_obs, current_states)
-                    else:
+                    with torch.no_grad():
                         actions, actions_log_prob, values, mu, sigma = self.actor_critic.act(current_obs, current_states)
                     # Step the vec_environment
                     next_obs, rews, dones, infos = self.vec_env.step(actions)
@@ -219,10 +265,7 @@ class PPO:
                         if metric_name in self.best_metrics:
                             self._maybe_save_best(metric_name, metric_value, it, total_num_steps)
 
-                if self.freeze_policy:
-                    with torch.no_grad():
-                        _, _, last_values, _, _ = self.actor_critic.act(current_obs, current_states)
-                else:
+                with torch.no_grad():
                     _, _, last_values, _, _ = self.actor_critic.act(current_obs, current_states)
                 stop = time.time()
                 collection_time = stop - start
@@ -245,8 +288,11 @@ class PPO:
                     self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)))
                 ep_infos.clear()
 
-            if not self.freeze_policy:
-                self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(num_learning_iterations)))
+            if not self.freeze_policy and num_learning_iterations > self.current_learning_iteration:
+                # Keep checkpoint numbering consistent with periodic saves:
+                # model_N contains the policy after completing iteration N.
+                final_iteration = num_learning_iterations - 1
+                self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(final_iteration)))
 
     def evaluate(self, num_eval_episodes=1000, current_obs=None):
         if current_obs is None:
@@ -356,6 +402,12 @@ class PPO:
 
         self.writer.add_scalar('Loss/value_function', locs['mean_value_loss'], locs['it'])
         self.writer.add_scalar('Loss/surrogate', locs['mean_surrogate_loss'], locs['it'])
+        self.writer.add_scalar('Loss/actor_grad_norm', self.last_actor_grad_norm, locs['it'])
+        self.writer.add_scalar('Loss/critic_grad_norm', self.last_critic_grad_norm, locs['it'])
+        if self.shared_parameters:
+            self.writer.add_scalar('Loss/shared_grad_norm', self.last_shared_grad_norm, locs['it'])
+        self.writer.add_scalar('Policy/actor_learning_rate', self.actor_optimizer.param_groups[0]['lr'], locs['it'])
+        self.writer.add_scalar('Critic/critic_learning_rate', self.critic_optimizer.param_groups[0]['lr'], locs['it'])
         self.writer.add_scalar('Policy/mean_noise_std', mean_std.item(), locs['it'])
         if "episode_reward" in rollout_metrics:
             self.writer.add_scalar('Train/mean_reward', rollout_metrics["episode_reward"], locs['it'])
@@ -457,6 +509,9 @@ class PPO:
     def update(self):
         mean_value_loss = 0
         mean_surrogate_loss = 0
+        mean_actor_grad_norm = 0.0
+        mean_critic_grad_norm = 0.0
+        mean_shared_grad_norm = 0.0
 
         batch = self.storage.mini_batch_generator(self.num_mini_batches)
         for epoch in range(self.num_learning_epochs):
@@ -489,12 +544,15 @@ class PPO:
                     kl_mean = torch.mean(kl)
 
                     if kl_mean > self.desired_kl * 2.0:
-                        self.step_size = max(1e-5, self.step_size / 1.5)
+                        self.actor_step_size = max(1e-5, self.actor_step_size / 1.5)
                     elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
-                        self.step_size = min(1e-2, self.step_size * 1.5)
+                        self.actor_step_size = min(1e-2, self.actor_step_size * 1.5)
 
-                    for param_group in self.optimizer.param_groups:
-                        param_group['lr'] = self.step_size
+                    for param_group in self.actor_optimizer.param_groups:
+                        param_group['lr'] = self.actor_step_size
+                    if self.shared_optimizer is not None:
+                        for param_group in self.shared_optimizer.param_groups:
+                            param_group['lr'] = min(self.actor_step_size, self.critic_step_size)
 
                 # Surrogate loss
                 ratio = torch.exp(actions_log_prob_batch - torch.squeeze(old_actions_log_prob_batch))
@@ -517,16 +575,32 @@ class PPO:
                 loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean()
 
                 # Gradient step
-                self.optimizer.zero_grad()
+                self.actor_optimizer.zero_grad()
+                self.critic_optimizer.zero_grad()
+                if self.shared_optimizer is not None:
+                    self.shared_optimizer.zero_grad()
                 loss.backward()
-                nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
-                self.optimizer.step()
+                actor_grad_norm = nn.utils.clip_grad_norm_(self.actor_parameters, self.max_grad_norm)
+                critic_grad_norm = nn.utils.clip_grad_norm_(self.critic_parameters, self.max_grad_norm)
+                shared_grad_norm = 0.0
+                if self.shared_parameters:
+                    shared_grad_norm = nn.utils.clip_grad_norm_(self.shared_parameters, self.max_grad_norm)
+                self.actor_optimizer.step()
+                self.critic_optimizer.step()
+                if self.shared_optimizer is not None:
+                    self.shared_optimizer.step()
 
                 mean_value_loss += value_loss.item()
                 mean_surrogate_loss += surrogate_loss.item()
+                mean_actor_grad_norm += float(actor_grad_norm)
+                mean_critic_grad_norm += float(critic_grad_norm)
+                mean_shared_grad_norm += float(shared_grad_norm)
 
         num_updates = self.num_learning_epochs * self.num_mini_batches
         mean_value_loss /= num_updates
         mean_surrogate_loss /= num_updates
+        self.last_actor_grad_norm = mean_actor_grad_norm / num_updates
+        self.last_critic_grad_norm = mean_critic_grad_norm / num_updates
+        self.last_shared_grad_norm = mean_shared_grad_norm / num_updates
 
         return mean_value_loss, mean_surrogate_loss

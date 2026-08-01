@@ -17,10 +17,6 @@ from utils.process_marl import process_MultiAgentRL, get_AgentIndex
 
 import os
 
-os.environ['CUDA_LAUNCH_BLOCKING'] = "1"   #开启可能让训练速度变慢
-
-
-
 def apply_training_mode(args, cfg, cfg_train):
     if args.joint_train_estimator_policy:
         if args.play:
