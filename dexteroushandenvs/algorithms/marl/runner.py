@@ -526,6 +526,29 @@ class Runner:
                 agent_k = "agent%i/" % agent_id + k
                 self.writter.add_scalar(agent_k, v, total_num_steps)
 
+            # DiagGaussian keeps one trainable standard deviation per action
+            # dimension. Log its mean so policy exploration is observable.
+            action_out = self.trainer[agent_id].policy.actor.act.action_out
+            if hasattr(action_out, "log_std"):
+                action_std = torch.sigmoid(
+                    action_out.log_std.detach() / action_out.std_x_coef
+                ) * action_out.std_y_coef
+                self.writter.add_scalar(
+                    "agent%i/action_std_mean" % agent_id,
+                    action_std.mean().item(),
+                    total_num_steps,
+                )
+                self.writter.add_scalar(
+                    "agent%i/action_std_min" % agent_id,
+                    action_std.min().item(),
+                    total_num_steps,
+                )
+                self.writter.add_scalar(
+                    "agent%i/action_std_max" % agent_id,
+                    action_std.max().item(),
+                    total_num_steps,
+                )
+
     def log_env(self, env_infos, total_num_steps):
         for k, v in env_infos.items():
             self.writter.add_scalars(k, {k: torch.mean(v)}, total_num_steps)
