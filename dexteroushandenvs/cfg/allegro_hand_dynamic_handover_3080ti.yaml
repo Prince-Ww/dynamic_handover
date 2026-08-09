@@ -47,11 +47,13 @@ env:
   maxConsecutiveSuccesses: 0
   # HR/SR diagnostic thresholds.
   hitDistThreshold: 0.25
-  catchDistThreshold: 0.20
+  catchDistThreshold: 0.15
   hitContactForceThreshold: 0.05
   catchContactForceThreshold: 0.05
-  catchSpeedThreshold: 1.5
+  catchSpeedThreshold: 0.5
   catchHoldSteps: 3
+  catchTerminalHoldSteps: 3
+  catchTerminalRequireTimeout: true
   objectHeightThreshold: 0.15
 
   asset:

@@ -615,6 +615,7 @@ class Runner:
             episode_success = None
             episode_hit_success = None
             episode_catch_success = None
+            episode_catch_event = None
             episode_object_id = None
             if isinstance(eval_infos, dict):
                 if "episode_success" in eval_infos:
@@ -623,6 +624,8 @@ class Runner:
                     episode_hit_success = eval_infos["episode_hit_success"].to(self.device).flatten()
                 if "episode_catch_success" in eval_infos:
                     episode_catch_success = eval_infos["episode_catch_success"].to(self.device).flatten()
+                if "episode_catch_event" in eval_infos:
+                    episode_catch_event = eval_infos["episode_catch_event"].to(self.device).flatten()
                 if "object_id" in eval_infos:
                     episode_object_id = eval_infos["object_id"].to(self.device).flatten().long()
                     have_object_ids = True
@@ -676,7 +679,7 @@ class Runner:
                             ep_reward.sum().item(),
                             episode_success[eval_i].item() if episode_success is not None else 0,
                             episode_hit_success[eval_i].item() if episode_hit_success is not None else 0,
-                            episode_catch_success[eval_i].item() if episode_catch_success is not None else 0,
+                            episode_catch_event[eval_i].item() if episode_catch_event is not None else 0,
                         )
                     one_episode_rewards[eval_i] = []
 

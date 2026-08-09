@@ -29,11 +29,15 @@ env:
   rotRewardScale: 1.0
   rotEps: 0.1
   actionPenaltyScale: -0.003
-  # One-time event bonuses per episode.
-  contactBonus: 0.5
-  catchBonus: 2.0
+  # Goal is rewarded once. Catch shaping starts only after the object has moved
+  # 0.15 m away from the thrower, and terminal catch requires a five-step hold.
+  contactBonus: 0.0
+  catchBonus: 0.0
+  catchDurationRewardScale: 0.1
+  catchDurationRewardCap: 2.0
   reachGoalBonus: 3.0
-  jointSuccessBonus: 5.0
+  terminalCatchBonus: 5.0
+  jointSuccessBonus: 0.0
   fallDistance: 0.4
   fallPenalty: 0.0
 
@@ -45,14 +49,17 @@ env:
   successTolerance: 0.1
   printNumSuccesses: False
   maxConsecutiveSuccesses: 0
-  # HR/SR diagnostic thresholds. These do not affect the reward; they only affect
-  # train_episode_hr, train_episode_sr, and debug_hrsr_* TensorBoard metrics.
+  # HR retains its contact test. SR uses only release state, palm distance,
+  # relative speed, object height, and temporal persistence.
   hitDistThreshold: 0.25
-  catchDistThreshold: 0.20
+  catchDistThreshold: 0.12
   hitContactForceThreshold: 0.05
   catchContactForceThreshold: 0.05
-  catchSpeedThreshold: 1.5
+  catchSpeedThreshold: 0.5
+  releaseDistThreshold: 0.15
   catchHoldSteps: 3
+  catchTerminalHoldSteps: 5
+  catchTerminalRequireTimeout: true
   objectHeightThreshold: 0.15
 
   asset:
@@ -143,7 +150,6 @@ task:
             distribution: "uniform"
             schedule: "linear"
             schedule_steps: 30000
-      another_hand: *hand_randomization
       object:
         scale:
           # GPU pipeline supports actor scale randomization during setup only.
