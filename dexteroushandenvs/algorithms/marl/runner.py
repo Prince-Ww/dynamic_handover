@@ -17,6 +17,7 @@ from torch.utils.tensorboard import SummaryWriter
 from itertools import chain
 from algorithms.marl.utils.separated_buffer import SeparatedReplayBuffer
 from utils.util import update_linear_schedule
+from utils.catch_diagnostics import CatchDiagnosticsRecorder
 
 def _t2n(x):
     return x.detach().cpu().numpy()
@@ -78,6 +79,8 @@ class Runner:
         self.log_interval = config["log_interval"]
         self.freeze_policy = config.get("freeze_policy", False)
         self.deterministic_rollout = config.get("deterministic_rollout", False)
+        self.catch_diagnostics_dir = config.get("catch_diagnostics_dir", "")
+        self.catch_diagnostics_frames = config.get("catch_diagnostics_frames", False)
 
         self.seed = self.envs.task.cfg["seed"]
         self.model_dir = model_dir
@@ -562,6 +565,17 @@ class Runner:
         eval_episode_hit_successes = []
         eval_episode_catch_successes = []
         object_names = list(getattr(getattr(self.eval_envs, "task", None), "used_training_objects", []))
+        diagnostics = None
+        if self.catch_diagnostics_dir:
+            diagnostics = CatchDiagnosticsRecorder(
+                self.catch_diagnostics_dir,
+                eval_threads,
+                object_names,
+                write_frames=self.catch_diagnostics_frames,
+            )
+            print("Catch diagnostics will be written to {}".format(
+                diagnostics.output_dir
+            ))
         per_object_enabled = self.eval_episodes_per_object > 0 and len(object_names) > 0
         have_object_ids = False
         per_object_rewards = {i: [] for i in range(len(object_names))}
@@ -595,6 +609,8 @@ class Runner:
             # Obser reward and next obs
             eval_obs, eval_share_obs, eval_rewards, eval_dones, eval_infos, _ = self.eval_envs.step(
                 eval_actions)
+            if diagnostics is not None:
+                diagnostics.record_step(eval_infos)
 
             episode_success = None
             episode_hit_success = None
@@ -630,6 +646,8 @@ class Runner:
                         obj_id = int(episode_object_id[eval_i].item())
                     if per_object_enabled and obj_id in per_object_rewards:
                         if len(per_object_rewards[obj_id]) >= self.eval_episodes_per_object:
+                            if diagnostics is not None:
+                                diagnostics.discard_episode(eval_i)
                             one_episode_rewards[eval_i] = []
                             continue
                     ep_reward = torch.sum(torch.cat(one_episode_rewards[eval_i]), dim=0).reshape(-1)
@@ -652,6 +670,14 @@ class Runner:
                         eval_episode_catch_successes.append(catch_success_value)
                         if obj_id in per_object_catch_successes:
                             per_object_catch_successes[obj_id].append(catch_success_value)
+                    if diagnostics is not None:
+                        diagnostics.finish_episode(
+                            eval_i,
+                            ep_reward.sum().item(),
+                            episode_success[eval_i].item() if episode_success is not None else 0,
+                            episode_hit_success[eval_i].item() if episode_hit_success is not None else 0,
+                            episode_catch_success[eval_i].item() if episode_catch_success is not None else 0,
+                        )
                     one_episode_rewards[eval_i] = []
 
             if per_object_enabled and have_object_ids:
@@ -727,6 +753,8 @@ class Runner:
                                 eval_env_infos.get(prefix + "_catch_success_rate"),
                             )
                         )
+                if diagnostics is not None:
+                    diagnostics.close()
                 break
 
     @torch.no_grad()

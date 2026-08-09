@@ -796,6 +796,7 @@ class AllegroHandDynamicHandover(BaseTask):
         self.episode_joint_success_buf = torch.zeros_like(self.rew_buf)
         self.catch_hold_buf = torch.zeros_like(self.rew_buf)
         self.catch_duration_reward_buf = torch.zeros_like(self.rew_buf)
+        self.enable_catch_diagnostics = self.cfg["env"].get("enableCatchDiagnostics", False)
 
     def get_internal_state(self):
         return self.root_state_tensor[self.object_indices, 3:7]
@@ -980,6 +981,60 @@ class AllegroHandDynamicHandover(BaseTask):
         self.extras['debug_hrsr_max_finger_contact_force'] = finger_contact_force.max().unsqueeze(0)
         self.extras['debug_hrsr_max_all_contact_force'] = all_contact_force.max().unsqueeze(0)
         self.extras['debug_hrsr_min_object_palm_relative_speed'] = object_relative_speed.min().unsqueeze(0)
+
+        if self.enable_catch_diagnostics:
+            finger_force_by_body = torch.norm(finger_contacts, dim=-1)
+            finger_dist_by_body = torch.norm(
+                self.rigid_body_states[:, self.hrsr_finger_contact_indices, 0:3]
+                - self.object_pos.unsqueeze(1),
+                p=2,
+                dim=-1,
+            )
+            self.extras['catch_diag_progress'] = self.progress_buf.clone()
+            self.extras['catch_diag_goal_dist'] = torch.norm(
+                self.goal_pos - self.object_pos, p=2, dim=-1
+            )
+            self.extras['catch_diag_palm_dist'] = palm_dist
+            self.extras['catch_diag_finger_contact_force'] = finger_contact_force
+            self.extras['catch_diag_palm_contact_force'] = palm_contact_force
+            self.extras['catch_diag_catcher_contact_force'] = catcher_contact_force
+            self.extras['catch_diag_all_contact_force'] = all_contact_force
+            self.extras['catch_diag_finger_contact_count'] = (
+                torch.norm(finger_contacts, dim=-1) >= self.catch_contact_force_threshold
+            ).sum(dim=-1)
+            self.extras['catch_diag_palm_contact_count'] = (
+                torch.norm(palm_contacts, dim=-1) >= self.catch_contact_force_threshold
+            ).sum(dim=-1)
+            self.extras['catch_diag_object_speed'] = torch.norm(self.object_linvel, p=2, dim=-1)
+            self.extras['catch_diag_palm_speed'] = torch.norm(self.a_hand_palm_linvel, p=2, dim=-1)
+            self.extras['catch_diag_relative_speed'] = object_relative_speed
+            self.extras['catch_diag_object_height'] = self.object_pos[:, 2]
+            self.extras['catch_diag_object_x'] = self.object_pos[:, 0]
+            self.extras['catch_diag_object_y'] = self.object_pos[:, 1]
+            self.extras['catch_diag_palm_x'] = self.a_hand_palm_pos[:, 0]
+            self.extras['catch_diag_palm_y'] = self.a_hand_palm_pos[:, 1]
+            self.extras['catch_diag_palm_z'] = self.a_hand_palm_pos[:, 2]
+            self.extras['catch_diag_object_vx'] = self.object_linvel[:, 0]
+            self.extras['catch_diag_object_vy'] = self.object_linvel[:, 1]
+            self.extras['catch_diag_object_vz'] = self.object_linvel[:, 2]
+            self.extras['catch_diag_palm_vx'] = self.a_hand_palm_linvel[:, 0]
+            self.extras['catch_diag_palm_vy'] = self.a_hand_palm_linvel[:, 1]
+            self.extras['catch_diag_palm_vz'] = self.a_hand_palm_linvel[:, 2]
+            self.extras['catch_diag_relative_vx'] = self.object_linvel[:, 0] - self.a_hand_palm_linvel[:, 0]
+            self.extras['catch_diag_relative_vy'] = self.object_linvel[:, 1] - self.a_hand_palm_linvel[:, 1]
+            self.extras['catch_diag_relative_vz'] = self.object_linvel[:, 2] - self.a_hand_palm_linvel[:, 2]
+            self.extras['catch_diag_min_finger_body_dist'] = finger_dist_by_body.min(dim=-1).values
+            for finger_i in range(finger_force_by_body.shape[1]):
+                self.extras['catch_diag_finger_force_{:02d}'.format(finger_i)] = (
+                    finger_force_by_body[:, finger_i]
+                )
+                self.extras['catch_diag_finger_dist_{:02d}'.format(finger_i)] = (
+                    finger_dist_by_body[:, finger_i]
+                )
+            self.extras['catch_diag_hit_now'] = hit_now
+            self.extras['catch_diag_catch_condition'] = catch_condition
+            self.extras['catch_diag_legacy_catch_now'] = catch_now
+            self.extras['catch_diag_hold_steps'] = self.catch_hold_buf.clone()
 
         reset_mask = self.reset_buf > 0
         self.episode_hit_success_buf = torch.where(

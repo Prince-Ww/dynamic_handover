@@ -97,6 +97,13 @@ def load_cfg(args, use_rlg_config=False):
     if getattr(args, "eval_episodes", 0) > 0 and not use_rlg_config:
         cfg_train["eval_episodes"] = args.eval_episodes
 
+    if getattr(args, "catch_diagnostics_dir", "") and not use_rlg_config:
+        if not args.test and not args.play:
+            raise ValueError("--catch_diagnostics_dir is evaluation-only; add --test or --play")
+        cfg_train["catch_diagnostics_dir"] = args.catch_diagnostics_dir
+        cfg_train["catch_diagnostics_frames"] = args.catch_diagnostics_frames
+        cfg["env"]["enableCatchDiagnostics"] = True
+
     if getattr(args, "used_objects", ""):
         cfg["env"]["usedTrainingObjects"] = [
             name.strip() for name in args.used_objects.split(",") if name.strip()
@@ -362,6 +369,18 @@ def get_args(benchmark=False, use_rlg_config=False):
             "type": int,
             "default": 1000,
             "help": "Number of completed episodes to evaluate in test/play mode",
+        },
+        {
+            "name": "--catch_diagnostics_dir",
+            "type": str,
+            "default": "",
+            "help": "Write per-episode catch diagnostics CSV files to this directory during evaluation",
+        },
+        {
+            "name": "--catch_diagnostics_frames",
+            "action": "store_true",
+            "default": False,
+            "help": "Also write per-frame catch diagnostics; requires --catch_diagnostics_dir",
         },
         {
             "name": "--stochastic_eval",
