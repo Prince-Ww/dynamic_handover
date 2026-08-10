@@ -88,6 +88,9 @@ class AllegroHandDynamicHandover(BaseTask):
         self.reset_rotation_noise = self.cfg["env"]["resetRotationNoise"]
         self.reset_dof_pos_noise = self.cfg["env"]["resetDofPosRandomInterval"]
         self.reset_dof_vel_noise = self.cfg["env"]["resetDofVelRandomInterval"]
+        # Keep the legacy relative target offset unless a configuration asks
+        # for an explicit world-frame target height.
+        self.goal_height = self.cfg["env"].get("goalHeight", None)
 
         self.allegro_hand_dof_speed_scale = self.cfg["env"]["dofSpeedScale"]
         self.use_relative_control = self.cfg["env"]["useRelativeControl"]
@@ -1305,7 +1308,10 @@ class AllegroHandDynamicHandover(BaseTask):
         # self.goal_states[env_ids, 2] += 0.1
 
         self.goal_states[env_ids, 1] -= 0.55 + rand_floats[:, 1] * 0.05
-        self.goal_states[env_ids, 2] += 0.1
+        if self.goal_height is None:
+            self.goal_states[env_ids, 2] += 0.1
+        else:
+            self.goal_states[env_ids, 2] = self.goal_height
 
         # self.goal_states[env_ids, 3:7] = new_rot
         self.root_state_tensor[self.goal_object_indices[env_ids], 0:3] = self.goal_states[env_ids, 0:3] + self.goal_displacement_tensor
