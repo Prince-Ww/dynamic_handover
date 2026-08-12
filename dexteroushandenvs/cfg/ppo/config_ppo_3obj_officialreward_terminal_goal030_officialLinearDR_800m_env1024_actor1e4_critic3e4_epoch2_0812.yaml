@@ -10,7 +10,7 @@ policy:
   activation: elu
 
 learn:
-  agent_name: ppo_3obj_officialreward_terminal_goal030_officialLinearDR_800m_env1024_actor1e4_critic3e4_epoch2_0812
+  agent_name: ppo_3obj_officialreward_terminal_goal030_officialLinearDR_800m_officialHyperparams_0812
   test: False
   resume: 0
   save_interval: 500
@@ -22,19 +22,16 @@ learn:
   cliprange: 0.2
   ent_coef: 0.0
   nsteps: 8
-  noptepochs: 2
+  noptepochs: 5
   nminibatches: 4
   max_grad_norm: 1.0
-  optim_stepsize: 1.e-4
-  actor_optim_stepsize: 1.e-4
+  optim_stepsize: 3.e-4
+  actor_optim_stepsize: 3.e-4
   critic_optim_stepsize: 3.e-4
-  schedule: fixed
-  desired_kl: 0.01
+  schedule: adaptive
+  desired_kl: 0.016
   gamma: 0.96
   lam: 0.95
   init_noise_std: 0.8
-  value_loss_coef: 1.0
-  use_clipped_value_loss: True
-
   log_interval: 1
   asymmetric: False
