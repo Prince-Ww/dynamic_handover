@@ -69,6 +69,12 @@ class AllegroHandDynamicHandover(BaseTask):
         self.dist_reward_scale = self.cfg["env"]["distRewardScale"]
         self.rot_reward_scale = self.cfg["env"]["rotRewardScale"]
         self.action_penalty_scale = self.cfg["env"]["actionPenaltyScale"]
+        self.reward_mode = self.cfg["env"].get("rewardMode", "projected_velocity")
+        if self.reward_mode not in ("projected_velocity", "official_y_velocity"):
+            raise ValueError(
+                "env.rewardMode must be 'projected_velocity' or 'official_y_velocity'"
+            )
+        self.use_official_y_velocity_reward = self.reward_mode == "official_y_velocity"
         self.success_tolerance = self.cfg["env"]["successTolerance"]
         self.reach_goal_bonus = self.cfg["env"]["reachGoalBonus"]
         self.contact_bonus = self.cfg["env"].get("contactBonus", 0.0)
@@ -104,6 +110,7 @@ class AllegroHandDynamicHandover(BaseTask):
         self.max_consecutive_successes = self.cfg["env"]["maxConsecutiveSuccesses"]
         self.av_factor = self.cfg["env"].get("averFactor", 0.01)
         print("Averaging factor: ", self.av_factor)
+        print("Reward mode: ", self.reward_mode)
         print(
             "Event reward bonuses: contact={}, catch={}, goal={}, terminal_catch={}, joint={}; "
             "catch duration: scale={}, cap={}".format(
@@ -839,7 +846,7 @@ class AllegroHandDynamicHandover(BaseTask):
         self.rew_buf[:], self.reset_buf[:], self.reset_goal_buf[:], self.progress_buf[:], self.successes[:], self.consecutive_successes[:] = compute_hand_reward(
             self.rew_buf, self.reset_buf, self.reset_goal_buf, self.progress_buf, self.successes, self.consecutive_successes,
             self.max_episode_length, self.object_pos, self.object_rot, self.goal_pos, self.goal_rot, self.allegro_left_hand_pos, self.allegro_right_hand_pos, self.allegro_hand_another_thmub_pos, self.aux_up_pos, self.object_linvel, self.leeft_hand_ee_rot,
-            self.dist_reward_scale, self.rot_reward_scale, self.rot_eps, self.actions, self.action_penalty_scale, self.allegro_hand_another_ff_pos, self.allegro_hand_another_mf_pos, self.allegro_hand_another_rf_pos, self.allegro_hand_ff_pos, self.allegro_hand_mf_pos, self.allegro_hand_rf_pos, self.a_hand_palm_pos, unscale(self.another_allegro_hand_default_dof_pos[6:],
+            self.dist_reward_scale, self.rot_reward_scale, self.rot_eps, self.actions, self.action_penalty_scale, self.use_official_y_velocity_reward, self.allegro_hand_another_ff_pos, self.allegro_hand_another_mf_pos, self.allegro_hand_another_rf_pos, self.allegro_hand_ff_pos, self.allegro_hand_mf_pos, self.allegro_hand_rf_pos, self.a_hand_palm_pos, unscale(self.another_allegro_hand_default_dof_pos[6:],
                                             self.allegro_hand_dof_lower_limits[6:22], self.allegro_hand_dof_upper_limits[6:22]), unscale(self.allegro_hand_another_dof_pos[:, 6:22] ,
                                             self.allegro_hand_dof_lower_limits[6:22], self.allegro_hand_dof_upper_limits[6:22]),
             self.success_tolerance, self.fall_dist, self.fall_penalty,
@@ -1562,7 +1569,7 @@ def compute_hand_reward(
     rew_buf, reset_buf, reset_goal_buf, progress_buf, successes, consecutive_successes,
     max_episode_length: float, object_pos, object_rot, target_pos, target_rot, allegro_left_hand_pos, allegro_right_hand_pos, allegro_another_hand_thmub_pos, aux_up_pos, object_vel, leeft_hand_ee_rot,
     dist_reward_scale: float, rot_reward_scale: float, rot_eps: float,
-    actions, action_penalty_scale: float, allegro_hand_another_ff_pos, allegro_hand_another_mf_pos, allegro_hand_another_rf_pos, allegro_hand_ff_pos, allegro_hand_mf_pos, allegro_hand_rf_pos, a_hand_palm_pos, hand_init_qpos, hand_qpos,
+    actions, action_penalty_scale: float, use_official_y_velocity_reward: bool, allegro_hand_another_ff_pos, allegro_hand_another_mf_pos, allegro_hand_another_rf_pos, allegro_hand_ff_pos, allegro_hand_mf_pos, allegro_hand_rf_pos, a_hand_palm_pos, hand_init_qpos, hand_qpos,
     success_tolerance: float, fall_dist: float,
     fall_penalty: float, max_consecutive_successes: int, av_factor: float, ignore_z_rot: bool
 ):
@@ -1582,11 +1589,25 @@ def compute_hand_reward(
 
     action_penalty = torch.sum(actions ** 2, dim=-1)
 
-    throw_to_catch_dir = a_hand_palm_pos - allegro_right_hand_pos
-    throw_to_catch_dir = throw_to_catch_dir / torch.clamp(torch.norm(throw_to_catch_dir, p=2, dim=-1, keepdim=True), min=1.0e-6)
-    object_vel_reward = torch.clamp(torch.sum(object_vel * throw_to_catch_dir, dim=-1), -0.1, 0.1)
-
-    reward = torch.exp(-dist_reward_scale * dist_rew) + object_vel_reward + action_penalty_scale * action_penalty
+    if use_official_y_velocity_reward:
+        # Matches the released implementation's dense reward: velocity along
+        # the world y-axis is rewarded only through the handover corridor.
+        object_vel_reward = torch.clamp(-object_vel[:, 1], -0.1, 0.1)
+        in_handover_corridor = torch.logical_and(
+            object_pos[:, 1] < -0.65,
+            object_pos[:, 1] > -0.85,
+        )
+        object_vel_reward = torch.where(
+            in_handover_corridor,
+            object_vel_reward,
+            torch.zeros_like(object_vel_reward),
+        )
+        reward = torch.exp(-12.0 * dist_rew) + object_vel_reward - 0.001 * action_penalty
+    else:
+        throw_to_catch_dir = a_hand_palm_pos - allegro_right_hand_pos
+        throw_to_catch_dir = throw_to_catch_dir / torch.clamp(torch.norm(throw_to_catch_dir, p=2, dim=-1, keepdim=True), min=1.0e-6)
+        object_vel_reward = torch.clamp(torch.sum(object_vel * throw_to_catch_dir, dim=-1), -0.1, 0.1)
+        reward = torch.exp(-dist_reward_scale * dist_rew) + object_vel_reward + action_penalty_scale * action_penalty
 
     # Find out which envs reach the preset target position and update successes count
     goal_resets = torch.where(goal_dist <= success_tolerance, torch.ones_like(reset_goal_buf), reset_goal_buf)

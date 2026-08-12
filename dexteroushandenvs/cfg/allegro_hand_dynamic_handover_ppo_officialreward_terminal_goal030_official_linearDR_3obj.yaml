@@ -1,0 +1,191 @@
+# Released PPO dense reward with the official progressive domain randomization.
+env:
+  env_name: "allegro_hand_dynamic_handover"
+  numEnvs: 1024
+  envSpacing: 1.25
+  episodeLength: 30
+  enableDebugVis: False
+  aggregateMode: 1
+  enableCameraSensors: False
+  cameraDebug: False
+  pointCloudDebug: False
+
+  stiffnessScale: 1.0
+  forceLimitScale: 1.0
+  useRelativeControl: False
+  dofSpeedScale: 100.0
+  actionsMovingAverage: 1.0
+  controlFrequencyInv: 3
+
+  startPositionNoise: 0.0
+  startRotationNoise: 0.0
+  resetPositionNoise: 0.0
+  resetRotationNoise: 0.0
+  resetDofPosRandomInterval: 0.0
+  resetDofVelRandomInterval: 0.0
+
+  distRewardScale: 10.0
+  rotRewardScale: 1.0
+  rotEps: 0.1
+  actionPenaltyScale: -0.003
+  # Uses exp(-12 * goal_distance), gated -object_v_y, and -0.001 * ||action||^2.
+  # The numeric scales above remain for compatibility but are ignored in this mode.
+  rewardMode: "official_y_velocity"
+  contactBonus: 0.0
+  catchBonus: 0.0
+  catchDurationRewardScale: 0.0
+  catchDurationRewardCap: 0.0
+  reachGoalBonus: 0.0
+  terminalCatchBonus: 0.0
+  jointSuccessBonus: 0.0
+  fallDistance: 0.4
+  fallPenalty: 0.0
+
+  objectType: "egg"
+  usedTrainingObjects: ["ball", "block", "pen"]
+  observationType: "full_state"
+  handAgentIndex: "[[0, 1, 2, 3, 4, 5]]"
+  asymmetric_observations: True
+  successTolerance: 0.1
+  printNumSuccesses: False
+  maxConsecutiveSuccesses: 0
+  hitDistThreshold: 0.25
+  catchDistThreshold: 0.14
+  hitContactForceThreshold: 0.05
+  catchContactForceThreshold: 0.05
+  catchSpeedThreshold: 0.5
+  releaseDistThreshold: 0.15
+  catchHoldSteps: 3
+  catchTerminalHoldSteps: 3
+  catchTerminalRequireTimeout: true
+  objectHeightThreshold: 0.15
+  goalHeight: 0.30
+
+  asset:
+    assetRoot: "../assets"
+    assetFileName: "mjcf/open_ai_assets/hand/shadow_hand.xml"
+    assetFileNameBlock: "urdf/objects/cube_multicolor.urdf"
+    assetFileNameEgg: "mjcf/open_ai_assets/hand/egg.xml"
+    assetFileNamePen: "mjcf/open_ai_assets/hand/pen.xml"
+
+task:
+  randomize: True
+  randomization_params:
+    frequency: 600
+    observations:
+      range: [0, 0.002]
+      range_correlated: [0, 0.001]
+      operation: "additive"
+      distribution: "gaussian"
+      schedule: "linear"
+      schedule_steps: 40000
+    actions:
+      range: [0.0, 0.05]
+      range_correlated: [0, 0.015]
+      operation: "additive"
+      distribution: "gaussian"
+      schedule: "linear"
+      schedule_steps: 40000
+    sim_params:
+      gravity:
+        range: [0, 0.4]
+        operation: "additive"
+        distribution: "gaussian"
+        schedule: "linear"
+        schedule_steps: 40000
+    actor_params:
+      hand: &hand_randomization
+        color: True
+        tendon_properties:
+          damping:
+            range: [0.3, 3.0]
+            operation: "scaling"
+            distribution: "loguniform"
+            schedule: "linear"
+            schedule_steps: 30000
+          stiffness:
+            range: [0.75, 1.5]
+            operation: "scaling"
+            distribution: "loguniform"
+            schedule: "linear"
+            schedule_steps: 30000
+        dof_properties:
+          damping:
+            range: [0.3, 3.0]
+            operation: "scaling"
+            distribution: "loguniform"
+            schedule: "linear"
+            schedule_steps: 30000
+          stiffness:
+            range: [0.75, 1.5]
+            operation: "scaling"
+            distribution: "loguniform"
+            schedule: "linear"
+            schedule_steps: 30000
+          lower:
+            range: [0, 0.01]
+            operation: "additive"
+            distribution: "gaussian"
+            schedule: "linear"
+            schedule_steps: 30000
+          upper:
+            range: [0, 0.01]
+            operation: "additive"
+            distribution: "gaussian"
+            schedule: "linear"
+            schedule_steps: 30000
+        rigid_body_properties:
+          mass:
+            range: [0.5, 1.5]
+            operation: "scaling"
+            distribution: "uniform"
+            setup_only: True
+        rigid_shape_properties:
+          friction:
+            num_buckets: 250
+            range: [0.7, 1.3]
+            operation: "scaling"
+            distribution: "uniform"
+            schedule: "linear"
+            schedule_steps: 30000
+      object:
+        scale:
+          range: [0.95, 1.05]
+          operation: "scaling"
+          distribution: "uniform"
+          setup_only: True
+        rigid_body_properties:
+          mass:
+            range: [0.5, 1.5]
+            operation: "scaling"
+            distribution: "uniform"
+            setup_only: True
+        rigid_shape_properties:
+          friction:
+            num_buckets: 250
+            range: [0.7, 1.3]
+            operation: "scaling"
+            distribution: "uniform"
+            schedule: "linear"
+            schedule_steps: 30000
+
+sim:
+  dt: 0.016666666666666666
+  substeps: 2
+  physx:
+    num_threads: 16
+    solver_type: 1
+    num_position_iterations: 8
+    num_velocity_iterations: 0
+    contact_offset: 0.002
+    rest_offset: 0.0
+    bounce_threshold_velocity: 0.2
+    max_depenetration_velocity: 1000.0
+    default_buffer_size_multiplier: 1000.0
+    max_gpu_contact_pairs: 33554432
+    contact_collection: 1
+  flex:
+    num_outer_iterations: 5
+    num_inner_iterations: 20
+    warm_start: 0.8
+    relaxation: 0.75
